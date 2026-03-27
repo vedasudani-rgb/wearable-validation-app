@@ -1,0 +1,246 @@
+import unittest
+import warnings
+import numpy as np
+
+from wearable_validation.models import HRDataSeries, TestRunMetadata
+from wearable_validation.analysis import analyze_hr_validation, analyze_group, _quality_label
+from wearable_validation.protocols import generate_protocol, compute_hrmax
+from wearable_validation.models import ProtocolParams
+
+
+def _make_metadata(athlete_name: str = "Test Athlete") -> TestRunMetadata:
+    return TestRunMetadata(
+        test_date="2026-03-26",
+        athlete_name=athlete_name,
+        wearable_device_name="Garmin Forerunner 265",
+        reference_device_name="Polar H10",
+        sport="running",
+        metric="heart_rate",
+        wearable_type="wrist_based_ppg",
+        reference_type="chest_strap_ecg",
+        conditions="outdoor flat road, 18°C",
+    )
+
+
+def _make_data(w: np.ndarray, r: np.ndarray) -> HRDataSeries:
+    t = np.arange(len(w), dtype=float)
+    return HRDataSeries(hr_wearable=w, hr_reference=r, timestamps=t)
+
+
+class TestQualityLabel(unittest.TestCase):
+    def test_excellent(self):
+        self.assertEqual(_quality_label(2.0), "excellent")
+
+    def test_good(self):
+        self.assertEqual(_quality_label(4.0), "good")
+
+    def test_acceptable(self):
+        self.assertEqual(_quality_label(7.5), "acceptable")
+
+    def test_poor(self):
+        self.assertEqual(_quality_label(12.0), "poor")
+
+    def test_boundary_at_3_is_good(self):
+        # 3.0 is NOT excellent (threshold is strictly < 3%)
+        self.assertEqual(_quality_label(3.0), "good")
+
+    def test_boundary_at_5_is_acceptable(self):
+        self.assertEqual(_quality_label(5.0), "acceptable")
+
+
+class TestHRmax(unittest.TestCase):
+    def test_tanaka_age_30(self):
+        self.assertEqual(compute_hrmax(30), 187)
+
+    def test_tanaka_age_40(self):
+        self.assertEqual(compute_hrmax(40), 180)
+
+    def test_tanaka_age_20(self):
+        self.assertEqual(compute_hrmax(20), 194)
+
+
+class TestAnalysisPerfectData(unittest.TestCase):
+    """Wearable = reference: all errors should be zero."""
+
+    def setUp(self):
+        rng = np.random.default_rng(42)
+        ref = rng.uniform(120, 180, size=200)
+        self.data = _make_data(ref.copy(), ref)
+        self.meta = _make_metadata()
+
+    def test_bias_zero(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.bias, 0.0, places=6)
+
+    def test_mae_zero(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.mae, 0.0, places=6)
+
+    def test_mape_zero(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.mape, 0.0, places=6)
+
+    def test_quality_excellent(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertEqual(r.quality_label, "excellent")
+
+    def test_n_samples(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertEqual(r.n_samples, 200)
+
+
+class TestAnalysisKnownBias(unittest.TestCase):
+    """Wearable = reference + constant 5 BPM offset."""
+
+    def setUp(self):
+        rng = np.random.default_rng(0)
+        self.ref = rng.uniform(120, 180, size=300)
+        self.wear = self.ref + 5.0
+        self.data = _make_data(self.wear, self.ref)
+        self.meta = _make_metadata()
+
+    def test_bias(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.bias, 5.0, places=5)
+
+    def test_mae(self):
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.mae, 5.0, places=5)
+
+    def test_loa_collapses_to_bias(self):
+        # Constant offset → SD of diff = 0 → LoA = [5, 5]
+        r = analyze_hr_validation(self.data, self.meta)
+        self.assertAlmostEqual(r.loa_lower, 5.0, places=3)
+        self.assertAlmostEqual(r.loa_upper, 5.0, places=3)
+
+
+class TestNaNHandling(unittest.TestCase):
+    def test_nan_pairs_dropped(self):
+        ref  = np.array([150.0, 155.0, np.nan, 160.0, 165.0])
+        wear = np.array([151.0, np.nan, 153.0, 161.0, 166.0])
+        data = _make_data(wear, ref)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            r = analyze_hr_validation(data, _make_metadata())
+        # Only indices 0 and 3 are complete pairs
+        # Valid: index 0 (150, 151), index 3 (160, 161), index 4 (165, 166) = 3 pairs
+        self.assertEqual(r.n_samples, 3)
+
+
+class TestLengthMismatch(unittest.TestCase):
+    def test_raises(self):
+        data = HRDataSeries(
+            hr_wearable=np.array([150.0, 160.0]),
+            hr_reference=np.array([150.0]),
+            timestamps=np.array([0.0, 1.0]),
+        )
+        with self.assertRaises(ValueError):
+            analyze_hr_validation(data, _make_metadata())
+
+
+class TestLowSampleWarning(unittest.TestCase):
+    def test_warns_when_few_samples(self):
+        ref  = np.ones(50) * 150.0
+        wear = ref + 2.0
+        data = _make_data(wear, ref)
+        with self.assertWarns(UserWarning):
+            analyze_hr_validation(data, _make_metadata())
+
+
+class TestProtocolGeneration(unittest.TestCase):
+    def _make_params(self, context: str, age=None) -> ProtocolParams:
+        return ProtocolParams(
+            sport="running", metric="heart_rate",
+            wearable_type="wrist_based_ppg", reference_type="chest_strap_ecg",
+            context=context,
+            wearable_device_name="Garmin", reference_device_name="Polar H10",
+            test_date="2026-03-26", age=age,
+        )
+
+    def test_steady_run_duration(self):
+        p = generate_protocol(self._make_params("steady_run"))
+        self.assertAlmostEqual(p.estimated_duration_min, 28.0, places=1)
+
+    def test_steady_run_samples(self):
+        p = generate_protocol(self._make_params("steady_run"))
+        self.assertEqual(p.n_expected_samples, 1680)
+
+    def test_interval_duration(self):
+        p = generate_protocol(self._make_params("interval_session"))
+        self.assertAlmostEqual(p.estimated_duration_min, 34.0, places=1)
+
+    def test_interval_samples(self):
+        p = generate_protocol(self._make_params("interval_session"))
+        self.assertEqual(p.n_expected_samples, 2040)
+
+    def test_invalid_context_raises(self):
+        params = self._make_params("steady_run")
+        params.context = "tempo_run"
+        with self.assertRaises(ValueError):
+            generate_protocol(params)
+
+    def test_invalid_wearable_type_raises(self):
+        params = self._make_params("steady_run")
+        params.wearable_type = "implant"
+        with self.assertRaises(ValueError):
+            generate_protocol(params)
+
+    def test_hrmax_set_when_age_given(self):
+        p = generate_protocol(self._make_params("steady_run", age=30))
+        self.assertEqual(p.hrmax, 187)
+
+    def test_bpm_targets_set_when_age_given(self):
+        p = generate_protocol(self._make_params("steady_run", age=30))
+        for step in p.steps:
+            self.assertIsNotNone(step.target_hr_bpm, f"Missing BPM for step: {step.name}")
+
+    def test_bpm_targets_absent_without_age(self):
+        p = generate_protocol(self._make_params("steady_run"))
+        for step in p.steps:
+            self.assertIsNone(step.target_hr_bpm)
+
+    def test_all_steps_have_instructions(self):
+        for context in ("steady_run", "interval_session"):
+            p = generate_protocol(self._make_params(context))
+            for step in p.steps:
+                self.assertTrue(step.instructions, f"Empty instructions: {step.name}")
+
+
+class TestGroupAnalysis(unittest.TestCase):
+    def setUp(self):
+        rng = np.random.default_rng(7)
+        self.metas = [_make_metadata(f"Athlete {i+1}") for i in range(3)]
+        self.datasets = []
+        self.reports = []
+        for i, meta in enumerate(self.metas):
+            ref = rng.uniform(130, 175, size=200)
+            wear = ref + (i * 2.0) + rng.normal(0, 3.0, 200)
+            data = _make_data(wear, ref)
+            self.datasets.append(data)
+            self.reports.append(analyze_hr_validation(data, meta))
+
+    def test_n_athletes(self):
+        g = analyze_group(self.reports, self.datasets)
+        self.assertEqual(g.n_athletes, 3)
+
+    def test_mean_mape_reasonable(self):
+        g = analyze_group(self.reports, self.datasets)
+        self.assertGreater(g.mean_mape, 0.0)
+        self.assertLess(g.mean_mape, 20.0)
+
+    def test_pooled_loa_wider_than_per_athlete(self):
+        g = analyze_group(self.reports, self.datasets)
+        span = g.pooled_loa_upper - g.pooled_loa_lower
+        self.assertGreater(span, 0)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            analyze_group([], [])
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            analyze_group(self.reports, self.datasets[:2])
+
+
+if __name__ == "__main__":
+    unittest.main()

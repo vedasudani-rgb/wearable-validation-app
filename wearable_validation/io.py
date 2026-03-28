@@ -198,14 +198,62 @@ def align_timeseries(
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 # Column name aliases (lowercase, stripped)
-_TIMESTAMP_ALIASES = {"timestamp", "time", "ts", "datetime", "date_time", "elapsed", "elapsed_s",
-                      "elapsed_sec", "time_s", "time_sec", "seconds"}
-_WEARABLE_ALIASES  = {"hr_wearable", "wearable_hr", "hr_watch", "watch_hr", "hr_device",
-                      "device_hr", "hr1", "heart_rate_1", "bpm_wearable"}
-_REFERENCE_ALIASES = {"hr_reference", "reference_hr", "hr_strap", "strap_hr", "hr_ref",
-                      "ref_hr", "hr2", "heart_rate_2", "bpm_reference", "gold_standard_hr"}
-_HR_ALIASES        = {"hr", "heart_rate", "bpm", "heartrate", "hr_bpm", "heart_rate_bpm",
-                      "hr_wearable", "hr_reference"}
+_TIMESTAMP_ALIASES = {
+    # generic
+    "timestamp", "time", "ts", "t",
+    # datetime variants
+    "datetime", "date_time", "date", "datetime_utc", "date_utc", "time_utc",
+    # elapsed / offset
+    "elapsed", "elapsed_s", "elapsed_sec", "elapsed_seconds", "elapsed_ms",
+    "time_s", "time_sec", "time_seconds", "time_ms", "time_milliseconds",
+    "seconds", "seconds_elapsed", "second",
+    # epoch
+    "epoch", "epoch_s", "epoch_ms", "unix", "unix_time", "unix_timestamp",
+    "posix", "posix_time",
+    # device export naming conventions
+    "record_time", "sample_time", "log_time", "observation_time",
+    "start_time", "event_time", "capture_time",
+    "Zeit", "zeit",  # German (Garmin/Polar sometimes exports in German)
+}
+_WEARABLE_ALIASES  = {
+    # generic wearable
+    "hr_wearable", "wearable_hr", "heart_rate_wearable", "wearable_heart_rate",
+    # watch / wristband
+    "hr_watch", "watch_hr", "hr_wrist", "wrist_hr", "wristband_hr",
+    "heart_rate_watch", "heart_rate_wrist",
+    # device
+    "hr_device", "device_hr", "hr_sensor", "sensor_hr",
+    # brand-neutral shorthand
+    "hr1", "heart_rate_1", "hr_a", "bpm_wearable", "bpm_device",
+    # PPG-specific
+    "hr_ppg", "ppg_hr", "ppg_heart_rate",
+}
+_REFERENCE_ALIASES = {
+    # generic reference
+    "hr_reference", "reference_hr", "heart_rate_reference", "reference_heart_rate",
+    # chest strap
+    "hr_strap", "strap_hr", "chest_strap_hr", "hr_chest", "chest_hr",
+    "heart_rate_strap", "heart_rate_chest",
+    # ECG
+    "hr_ecg", "ecg_hr", "ecg_heart_rate",
+    # shorthand
+    "hr_ref", "ref_hr", "hr2", "heart_rate_2", "hr_b",
+    "bpm_reference", "bpm_ref", "gold_standard_hr",
+    # common export names
+    "rr_hr", "polar_hr",
+}
+_HR_ALIASES        = {
+    # canonical
+    "hr", "heart_rate", "bpm", "heartrate", "hr_bpm", "heart_rate_bpm",
+    # variants
+    "heart_rate_avg", "avg_hr", "average_hr", "mean_hr",
+    "hr_avg", "hr_mean", "hr_value", "heart_rate_value",
+    "pulse", "pulse_rate", "pulse_bpm",
+    # also accept the wearable/reference specific names so separate-file
+    # uploads work regardless of which column name convention the device uses
+    "hr_wearable", "hr_reference", "hr_watch", "hr_strap", "hr_sensor",
+    "hr_device", "hr_chest", "hr_ecg",
+}
 
 
 def _read_file(file) -> pd.DataFrame:

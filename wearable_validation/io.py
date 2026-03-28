@@ -204,7 +204,8 @@ _WEARABLE_ALIASES  = {"hr_wearable", "wearable_hr", "hr_watch", "watch_hr", "hr_
                       "device_hr", "hr1", "heart_rate_1", "bpm_wearable"}
 _REFERENCE_ALIASES = {"hr_reference", "reference_hr", "hr_strap", "strap_hr", "hr_ref",
                       "ref_hr", "hr2", "heart_rate_2", "bpm_reference", "gold_standard_hr"}
-_HR_ALIASES        = {"hr", "heart_rate", "bpm", "heartrate", "hr_bpm", "heart_rate_bpm"}
+_HR_ALIASES        = {"hr", "heart_rate", "bpm", "heartrate", "hr_bpm", "heart_rate_bpm",
+                      "hr_wearable", "hr_reference"}
 
 
 def _read_file(file) -> pd.DataFrame:

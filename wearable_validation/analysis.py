@@ -12,7 +12,7 @@ from wearable_validation.constants import (
     MAPE_EXCELLENT_THRESHOLD, MAPE_GOOD_THRESHOLD, MAPE_ACCEPTABLE_THRESHOLD,
     HR_BINS, HR_BIN_MIN_SAMPLES, COVERAGE_TOLERANCE_PCT,
 )
-from wearable_validation import report as _report_module
+import wearable_validation.report as _report_module
 
 
 # ── Per-athlete analysis ──────────────────────────────────────────────────────

@@ -167,6 +167,39 @@ class DeviceComparisonReport:
     summary_text: str
 
 
+# ── Artifact detection ────────────────────────────────────────────────────────
+
+@dataclass
+class ArtifactReport:
+    n_total: int
+    n_flagged_wearable: int           # samples flagged in wearable channel
+    n_flagged_reference: int          # samples flagged in reference channel
+    wearable_mask: np.ndarray         # bool (N,), True = flagged (any type)
+    reference_mask: np.ndarray        # bool (N,), True = flagged (any type)
+    combined_mask: np.ndarray         # True if flagged in either channel
+    flag_reasons_wearable: list[str]  # human-readable breakdown per flag type
+    flag_reasons_reference: list[str]
+    # Per-type masks for plot legend differentiation
+    oor_mask_wearable: np.ndarray     # out-of-range
+    spike_mask_wearable: np.ndarray   # rate-of-change spike
+    flatline_mask_wearable: np.ndarray
+    oor_mask_reference: np.ndarray
+    spike_mask_reference: np.ndarray
+    flatline_mask_reference: np.ndarray
+
+    @property
+    def n_flagged_combined(self) -> int:
+        return int(self.combined_mask.sum())
+
+    @property
+    def pct_flagged(self) -> float:
+        return 100.0 * self.n_flagged_combined / self.n_total if self.n_total > 0 else 0.0
+
+    @property
+    def has_artifacts(self) -> bool:
+        return self.n_flagged_combined > 0
+
+
 # ── Group (multi-athlete) analysis output ────────────────────────────────────
 
 @dataclass

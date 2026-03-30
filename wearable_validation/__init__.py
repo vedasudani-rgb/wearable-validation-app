@@ -6,6 +6,8 @@ Field HR validation protocol generator and analysis library.
 Public API:
   generate_protocol()            — build a field test protocol
   compute_hrmax()                — Tanaka HRmax formula
+  detect_artifacts()             — flag out-of-range, spike, and flatline samples
+  apply_artifact_exclusion()     — return cleaned HRDataSeries with artifacts removed
   analyze_hr_validation()        — per-athlete agreement statistics
   analyze_group()                — multi-athlete group statistics
   analyze_by_intensity_bin()     — intensity-stratified accuracy
@@ -26,6 +28,7 @@ from wearable_validation.models import (
     TestRunMetadata,
     HRDataSeries,
     AnalysisReport,
+    ArtifactReport,
     GroupAnalysisReport,
     IntensityBinResult,
     StepCoverageResult,
@@ -37,6 +40,7 @@ from wearable_validation.models import (
 )
 from wearable_validation.protocols import generate_protocol, compute_hrmax
 from wearable_validation.io import parse_combined_file, parse_two_files, align_timeseries
+from wearable_validation.artifacts import detect_artifacts, apply_artifact_exclusion
 from wearable_validation.analysis import (
     analyze_hr_validation,
     analyze_group,
@@ -56,6 +60,7 @@ __all__ = [
     "TestRunMetadata",
     "HRDataSeries",
     "AnalysisReport",
+    "ArtifactReport",
     "GroupAnalysisReport",
     "IntensityBinResult",
     "StepCoverageResult",
@@ -70,6 +75,8 @@ __all__ = [
     "parse_combined_file",
     "parse_two_files",
     "align_timeseries",
+    "detect_artifacts",
+    "apply_artifact_exclusion",
     "analyze_hr_validation",
     "analyze_group",
     "analyze_by_intensity_bin",

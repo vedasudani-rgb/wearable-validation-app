@@ -16,6 +16,8 @@ from wearable_validation import (
     compute_hrmax,
     parse_combined_file,
     parse_two_files,
+    detect_artifacts,
+    apply_artifact_exclusion,
     analyze_hr_validation,
     analyze_group,
     analyze_by_intensity_bin,
@@ -31,6 +33,7 @@ from wearable_validation.plots import (
     plot_scatter,
     plot_group_bland_altman,
     plot_intensity_bins,
+    plot_data_preview,
 )
 from wearable_validation.constants import (
     QUALITY_COLOURS, QUALITY_LABELS, HRMAX_SE_BPM, SPORT_CONTEXTS, USE_CASES,
@@ -243,6 +246,60 @@ def _build_metadata(
     )
 
 
+def _render_data_preview(data, artifact_report, metadata=None, key_prefix="single"):
+    """Render artifact summary and preview plot. Returns True if user wants artifacts excluded."""
+    n_flagged = artifact_report.n_flagged_combined
+    n_total   = artifact_report.n_total
+    pct       = artifact_report.pct_flagged
+
+    if not artifact_report.has_artifacts:
+        st.success(f"No artifacts detected across {n_total:,} samples. Data looks clean.")
+        exclude = False
+    else:
+        # Severity colour
+        colour = "#f39c12" if pct < 5 else "#e74c3c"
+        st.markdown(
+            f"<div style='background:{colour};padding:8px 14px;border-radius:6px;"
+            f"color:white;margin-bottom:8px;'>"
+            f"<b>{n_flagged} of {n_total:,} samples flagged as potential artifacts ({pct:.1f}%)</b>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Per-channel breakdown
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.container(border=True):
+                if artifact_report.flag_reasons_wearable:
+                    st.markdown("**⌚ Wearable channel — ⚠️ flagged**")
+                    for r in artifact_report.flag_reasons_wearable:
+                        st.caption(f"• {r}")
+                else:
+                    st.markdown("**⌚ Wearable channel — ✅ clean**")
+        with c2:
+            with st.container(border=True):
+                if artifact_report.flag_reasons_reference:
+                    st.markdown("**📡 Reference channel — ⚠️ flagged**")
+                    for r in artifact_report.flag_reasons_reference:
+                        st.caption(f"• {r}")
+                else:
+                    st.markdown("**📡 Reference channel — ✅ clean**")
+
+        exclude = st.checkbox(
+            "Exclude flagged samples from analysis",
+            value=True,
+            key=f"{key_prefix}_exclude_artifacts",
+            help=(
+                "Removes samples flagged as out-of-range, motion spikes, or flatlines "
+                "from both channels before running analysis. Recommended unless you have "
+                "a specific reason to include them."
+            ),
+        )
+
+    st.pyplot(plot_data_preview(data, artifact_report, metadata))
+    return exclude
+
+
 def _render_coverage(coverage):
     """Render HR zone coverage results as a compact table."""
     status_emoji = {
@@ -428,10 +485,12 @@ if mode == "Single Athlete":
     athlete_name = st.text_input("Athlete Name (for report)", value="Athlete 1")
     conditions = st.text_input("Conditions (optional)", placeholder="e.g. outdoor flat, 18°C")
 
+    parsed_data = None  # will hold HRDataSeries if files are ready
+
     if file_mode.startswith("Combined"):
         uploaded = st.file_uploader("Upload combined CSV or JSON", type=["csv", "json"])
         if uploaded:
-            with st.expander("Column Mapping (auto-detected — override if needed)"):
+            with st.expander("Column Mapping (auto-detected — override if needed)", expanded=False):
                 df_preview = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_json(uploaded)
                 cols = list(df_preview.columns)
                 st.caption(f"Detected columns: {cols}")
@@ -441,11 +500,46 @@ if mode == "Single Athlete":
             st.session_state["single_upload"] = (
                 uploaded, "combined", ts_col, w_col, r_col, athlete_name, conditions
             )
+            try:
+                uploaded.seek(0)
+                parsed_data = parse_combined_file(uploaded, timestamp_col=ts_col,
+                                                  wearable_col=w_col, reference_col=r_col)
+            except Exception as e:
+                st.error(f"Could not parse file: {e}")
     else:
         w_file = st.file_uploader("Wearable device file (CSV or JSON)", type=["csv", "json"], key="wfile")
         r_file = st.file_uploader("Reference device file (CSV or JSON)", type=["csv", "json"], key="rfile")
         if w_file and r_file:
             st.session_state["single_upload"] = (w_file, r_file, "two", athlete_name, conditions)
+            try:
+                w_file.seek(0); r_file.seek(0)
+                parsed_data = parse_two_files(w_file, r_file)
+            except Exception as e:
+                st.error(f"Could not parse files: {e}")
+
+    # If files were cleared, wipe stale analysis results immediately
+    if parsed_data is None:
+        for _k in ["single_parsed_data", "single_artifact_report",
+                   "single_report", "single_data", "single_bins",
+                   "single_coverage", "single_rec"]:
+            st.session_state.pop(_k, None)
+
+    # Data preview + artifact detection (shown as soon as files are parsed)
+    if parsed_data is not None:
+        st.markdown("---")
+        st.subheader("Data Preview")
+        preview_meta = _build_metadata(
+            athlete_name, conditions, sport_key, wearable_type,
+            reference_type, wearable_name, reference_name, str(test_date),
+        )
+        artifact_report = detect_artifacts(parsed_data)
+        exclude_artifacts = _render_data_preview(
+            parsed_data, artifact_report, preview_meta, key_prefix="single"
+        )
+        # Store parsed data + artifact report for the Analyse step
+        # (exclude_artifacts is stored automatically by Streamlit via the widget key)
+        st.session_state["single_parsed_data"]     = parsed_data
+        st.session_state["single_artifact_report"] = artifact_report
 
 elif mode == "Multiple Athletes":
     st.markdown("Add one row per athlete. Each athlete needs a wearable file and a reference file.")
@@ -530,50 +624,50 @@ st.header("3. Analysis Results")
 
 
 if mode == "Single Athlete":
-    if st.button("Analyse", type="primary"):
-        upload = st.session_state.get("single_upload")
-        if not upload:
-            st.warning("Please upload data files first.")
-        else:
-            try:
-                if upload[1] == "combined":
-                    _, _, ts_col, w_col, r_col, ath_name, conds = upload
-                    upload[0].seek(0)
-                    data = parse_combined_file(
-                        upload[0], timestamp_col=ts_col,
-                        wearable_col=w_col, reference_col=r_col,
-                    )
-                else:
-                    w_f, r_f, _, ath_name, conds = upload
-                    w_f.seek(0); r_f.seek(0)
-                    data = parse_two_files(w_f, r_f)
+    has_data = "single_parsed_data" in st.session_state
+    if st.button("Analyse", type="primary", disabled=not has_data):
+        try:
+            data = st.session_state["single_parsed_data"]
+            artifact_report = st.session_state.get("single_artifact_report")
+            exclude = st.session_state.get("single_exclude_artifacts", True)
 
-                meta = _build_metadata(
-                    ath_name, conds, sport_key, wearable_type,
-                    reference_type, wearable_name, reference_name, str(test_date),
-                )
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter("always")
-                    report = analyze_hr_validation(data, meta)
-                    for w in caught:
-                        st.warning(str(w.message))
+            if exclude and artifact_report and artifact_report.has_artifacts:
+                data = apply_artifact_exclusion(data, artifact_report)
 
-                bins = analyze_by_intensity_bin(data)
+            upload = st.session_state.get("single_upload")
+            if upload and upload[1] == "combined":
+                ath_name, conds = upload[5], upload[6]
+            elif upload:
+                ath_name, conds = upload[3], upload[4]
+            else:
+                ath_name, conds = athlete_name, conditions
 
-                coverage = None
-                if "protocol" in st.session_state:
-                    coverage = check_hr_zone_coverage(data, st.session_state["protocol"])
+            meta = _build_metadata(
+                ath_name, conds, sport_key, wearable_type,
+                reference_type, wearable_name, reference_name, str(test_date),
+            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                report = analyze_hr_validation(data, meta)
+                for w in caught:
+                    st.warning(str(w.message))
 
-                rec = generate_recommendation(report, selected_use_cases)
+            bins = analyze_by_intensity_bin(data)
 
-                st.session_state["single_report"]   = report
-                st.session_state["single_data"]     = data
-                st.session_state["single_bins"]     = bins
-                st.session_state["single_coverage"] = coverage
-                st.session_state["single_rec"]      = rec
+            coverage = None
+            if "protocol" in st.session_state:
+                coverage = check_hr_zone_coverage(data, st.session_state["protocol"])
 
-            except Exception as e:
-                st.error(f"Analysis failed: {e}")
+            rec = generate_recommendation(report, selected_use_cases)
+
+            st.session_state["single_report"]   = report
+            st.session_state["single_data"]     = data
+            st.session_state["single_bins"]     = bins
+            st.session_state["single_coverage"] = coverage
+            st.session_state["single_rec"]      = rec
+
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
 
     if "single_report" in st.session_state:
         report   = st.session_state["single_report"]
@@ -681,7 +775,10 @@ elif mode == "Multiple Athletes":
             if all_reports:
                 group = analyze_group(all_reports, all_data)
                 st.session_state["group_report"] = group
-                st.session_state["group_data"] = all_data
+                st.session_state["group_data"]   = all_data
+                st.session_state["group_artifact_counts"] = [
+                    detect_artifacts(d).n_flagged_combined for d in all_data
+                ]
 
     if "group_report" in st.session_state:
         group    = st.session_state["group_report"]
@@ -699,9 +796,10 @@ elif mode == "Multiple Athletes":
 
         # Per-athlete table
         st.subheader("Per-Athlete Results")
+        artifact_counts = st.session_state.get("group_artifact_counts", [])
         table_rows = []
-        for r in group.athlete_reports:
-            table_rows.append({
+        for i, r in enumerate(group.athlete_reports):
+            row = {
                 "Athlete":    r.metadata.athlete_name if r.metadata else "—",
                 "MAPE (%)":   round(r.mape, 2),
                 "Bias (BPM)": round(r.bias, 2),
@@ -709,7 +807,10 @@ elif mode == "Multiple Athletes":
                 "LoA Lower":  round(r.loa_lower, 2),
                 "LoA Upper":  round(r.loa_upper, 2),
                 "Quality":    QUALITY_LABELS[r.quality_label],
-            })
+            }
+            if artifact_counts:
+                row["Artifacts"] = artifact_counts[i]
+            table_rows.append(row)
         st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
         # Group metrics

@@ -76,6 +76,14 @@ Sports: `running`, `cycling`. Contexts are sport-gated via `SPORT_CONTEXTS`. Add
 
 `test_data/` contains pre-generated CSVs organised by scenario (running_steady, running_interval, cycling_steady, cycling_interval, multi_athlete, device_comparison). Regenerate with `python generate_test_data.py`. All files use plain integer seconds as timestamps (column: `timestamp`), with `hr_wearable` or `hr_reference` as HR column names.
 
+## Deployment (Streamlit Cloud)
+
+Live at `wearable-validation-app.streamlit.app` (private repo: `vedasudani-rgb/wearable-validation-app`).
+
+- `runtime.txt` pins Python 3.11. Streamlit Cloud defaults to Python 3.14+ which is too new; without this file the app breaks.
+- `requirements.txt` caps `numpy<2.0` and `pandas<3.0` to avoid breaking API changes in those major versions.
+- After pushing commits, Streamlit Cloud does a `git pull` (not a fresh clone). If a file update doesn't take effect, go to the Streamlit Cloud dashboard → three-dot menu → **Reboot app** to force a fresh `git clone`.
+
 ## Backlog
 
 Approved features not yet implemented:

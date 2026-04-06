@@ -5,7 +5,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from wearable_validation.io import normalise_timestamps, align_timeseries, parse_combined_file, parse_two_files
+from wearable_validation.io import normalise_timestamps, align_timeseries, parse_combined_file, parse_two_files, trim_session
+from wearable_validation.models import HRDataSeries
 
 
 class TestNormaliseTimestamps(unittest.TestCase):
@@ -164,6 +165,44 @@ class TestParseTwoFiles(unittest.TestCase):
         fr = self._make_device_csv(hr_r, t_offset=10)
         data = parse_two_files(fw, fr)
         self.assertGreaterEqual(len(data.hr_wearable), 199)
+
+
+class TestTrimSession(unittest.TestCase):
+
+    def _make_data(self, n: int = 600) -> HRDataSeries:
+        """600-sample HRDataSeries with timestamps 0..599 s."""
+        t = np.arange(n, dtype=float)
+        return HRDataSeries(
+            hr_wearable=np.full(n, 150.0),
+            hr_reference=np.full(n, 148.0),
+            timestamps=t,
+        )
+
+    def test_trim_session_removes_warmup(self):
+        data = self._make_data()
+        result = trim_session(data, warmup_seconds=60.0)
+        self.assertTrue(np.all(result.timestamps >= 0.0))
+        # Original had 600 samples; 60 s warm-up removed → ~540 remain
+        self.assertEqual(len(result.hr_wearable), 540)
+
+    def test_trim_session_removes_cooldown(self):
+        data = self._make_data()
+        result = trim_session(data, cooldown_seconds=60.0)
+        self.assertEqual(len(result.hr_wearable), 540)
+
+    def test_trim_session_retains_original_timestamps(self):
+        # Timestamps are NOT re-zeroed — they stay in the original timebase
+        # so that protocol step boundaries (used by check_hr_zone_coverage) still align.
+        data = self._make_data()
+        result = trim_session(data, warmup_seconds=120.0)
+        self.assertAlmostEqual(result.timestamps[0], 120.0)
+
+    def test_trim_session_zero_leaves_data_unchanged(self):
+        data = self._make_data()
+        result = trim_session(data, warmup_seconds=0.0, cooldown_seconds=0.0)
+        np.testing.assert_array_equal(result.hr_wearable, data.hr_wearable)
+        np.testing.assert_array_equal(result.hr_reference, data.hr_reference)
+        np.testing.assert_array_almost_equal(result.timestamps, data.timestamps)
 
 
 if __name__ == "__main__":

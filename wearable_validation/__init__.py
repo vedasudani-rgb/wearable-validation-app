@@ -17,6 +17,7 @@ Public API:
   parse_combined_file()          — ingest single combined CSV/JSON
   parse_two_files()              — ingest two separate device files
   align_timeseries()             — timestamp-based linear interpolation
+  trim_session()                 — trim leading warm-up and/or trailing cool-down
   format_report()                — plain-text per-athlete report
   format_group_report()          — plain-text group report
 """
@@ -39,7 +40,7 @@ from wearable_validation.models import (
     DeviceComparisonReport,
 )
 from wearable_validation.protocols import generate_protocol, compute_hrmax
-from wearable_validation.io import parse_combined_file, parse_two_files, align_timeseries
+from wearable_validation.io import parse_combined_file, parse_two_files, align_timeseries, trim_session
 from wearable_validation.artifacts import detect_artifacts, apply_artifact_exclusion
 from wearable_validation.analysis import (
     analyze_hr_validation,
@@ -75,6 +76,7 @@ __all__ = [
     "parse_combined_file",
     "parse_two_files",
     "align_timeseries",
+    "trim_session",
     "detect_artifacts",
     "apply_artifact_exclusion",
     "analyze_hr_validation",

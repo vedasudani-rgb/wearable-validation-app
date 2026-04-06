@@ -131,6 +131,9 @@ def check_hr_zone_coverage(
         n_in_step = int(np.sum(mask))
 
         if n_in_step == 0:
+            # No samples in this step — it was likely trimmed or not recorded.
+            # Use "trimmed" so it doesn't pollute the overall status with a
+            # false "Provide athlete age" warning.
             step_results.append(StepCoverageResult(
                 step_name=boundary.step_name,
                 intensity_label=boundary.intensity_label,
@@ -138,7 +141,7 @@ def check_hr_zone_coverage(
                 target_bpm_range=None,
                 actual_median_bpm=float("nan"),
                 n_samples_in_step=0,
-                status="unknown",
+                status="trimmed",
             ))
             continue
 
@@ -185,22 +188,26 @@ def check_hr_zone_coverage(
             status=status,
         ))
 
-    # Overall status
-    statuses = [r.status for r in step_results]
-    if all(s in ("met", "warm_up", "cool_down") for s in statuses):
+    # Overall status — exclude "trimmed" steps (no samples, intentionally excluded)
+    # from the assessment so they don't pollute the verdict.
+    assessed = [r.status for r in step_results if r.status != "trimmed"]
+    if not assessed:
         overall = "complete"
         warning = ""
-    elif "unknown" in statuses:
+    elif all(s in ("met", "warm_up", "cool_down") for s in assessed):
+        overall = "complete"
+        warning = ""
+    elif "unknown" in assessed:
         overall = "unknown"
         warning = "Provide athlete age to enable target BPM comparison."
-    elif "not_reached" in statuses:
+    elif "not_reached" in assessed:
         not_reached = [r.step_name for r in step_results if r.status == "not_reached"]
         overall = "insufficient"
         warning = (
             f"Target intensity not reached in: {', '.join(not_reached)}. "
             "High-intensity accuracy results may be unreliable."
         )
-    elif "partial" in statuses:
+    elif "partial" in assessed:
         overall = "partial"
         partial = [r.step_name for r in step_results if r.status == "partial"]
         warning = f"Target partially met in: {', '.join(partial)}."

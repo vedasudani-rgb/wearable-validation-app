@@ -125,25 +125,37 @@ HR_BIN_MIN_SAMPLES: int = 10  # bins with fewer samples show as insufficient
 USE_CASES: dict[str, dict] = {
     "load_monitoring": {
         "label":               "Daily Load Monitoring",
-        "description":         "Tracking training load trends (e.g. TRIMP, session HR) over time.",
+        "description":         (
+            "Tracks session training load over time using average HR or metrics like TRIMP. "
+            "Errors average out across a full session, so a ±5% tolerance is acceptable."
+        ),
         "mape_threshold":      5.0,
         "loa_span_threshold":  20.0,   # Borresen & Lambert (2009); Gillinov et al. (2017)
     },
     "zone_training": {
         "label":               "HR Zone Training",
-        "description":         "Prescribing and monitoring effort within defined HR zones.",
+        "description":         (
+            "Keeps athletes within a target effort zone (e.g. Zone 2 aerobic, Zone 4 threshold). "
+            "HR zones are ~10–15 BPM wide — device error must stay below that to reliably identify the correct zone."
+        ),
         "mape_threshold":      5.0,
         "loa_span_threshold":  15.0,   # Seiler & Kjerland (2006); Lucia et al. (2001)
     },
     "interval_pacing": {
         "label":               "Interval Pacing",
-        "description":         "Guiding effort during high-intensity intervals in real time.",
+        "description":         (
+            "Provides real-time HR feedback during high-intensity intervals. "
+            "Requires the strictest accuracy (±5 BPM) because a misread at peak effort directly affects pacing decisions."
+        ),
         "mape_threshold":      3.0,
         "loa_span_threshold":  10.0,   # Buchheit & Laursen (2013); Navalta et al. (2020)
     },
     "recovery_tracking": {
         "label":               "Recovery Tracking",
-        "description":         "Monitoring post-exercise and resting HR for recovery assessment.",
+        "description":         (
+            "Monitors resting and post-exercise HR to gauge readiness for the next session. "
+            "Recovery differences of ~10 BPM are clinically meaningful, so device error must stay below that threshold."
+        ),
         "mape_threshold":      5.0,
         "loa_span_threshold":  15.0,   # Buchheit et al. (2010); Plews et al. (2013)
     },

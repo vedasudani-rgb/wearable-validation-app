@@ -16,6 +16,7 @@ from wearable_validation import (
     compute_hrmax,
     parse_combined_file,
     parse_two_files,
+    trim_session,
     detect_artifacts,
     apply_artifact_exclusion,
     analyze_hr_validation,
@@ -70,6 +71,7 @@ COVERAGE_STATUS_COLOUR = {
     "partial":     "#f39c12",
     "not_reached": "#e74c3c",
     "unknown":     "#95a5a6",
+    "trimmed":     "#bdc3c7",
 }
 
 RECOMMENDATION_STATUS_COLOUR = {
@@ -307,6 +309,7 @@ def _render_coverage(coverage):
         "partial":     "⚠️ Partial",
         "not_reached": "❌ Not Reached",
         "unknown":     "— Unknown",
+        "trimmed":     "✂️ Trimmed",
     }
     rows = []
     for s in coverage.step_results:
@@ -541,6 +544,22 @@ if mode == "Single Athlete":
         st.session_state["single_parsed_data"]     = parsed_data
         st.session_state["single_artifact_report"] = artifact_report
 
+        # Session trim
+        with st.expander("Session trim (optional)"):
+            st.caption(
+                "Trim leading warm-up and/or trailing cool-down from analysis. "
+                "Only start/end trims are supported to preserve accuracy of intensity-specific recommendations."
+            )
+            _tc1, _tc2 = st.columns(2)
+            _tc1.number_input(
+                "Exclude warm-up (minutes)", min_value=0.0, max_value=30.0,
+                value=0.0, step=0.5, key="single_warmup_minutes",
+            )
+            _tc2.number_input(
+                "Exclude cool-down (minutes)", min_value=0.0, max_value=30.0,
+                value=0.0, step=0.5, key="single_cooldown_minutes",
+            )
+
 elif mode == "Multiple Athletes":
     st.markdown("Add one row per athlete. Each athlete needs a wearable file and a reference file.")
 
@@ -633,6 +652,11 @@ if mode == "Single Athlete":
 
             if exclude and artifact_report and artifact_report.has_artifacts:
                 data = apply_artifact_exclusion(data, artifact_report)
+
+            warmup_s = st.session_state.get("single_warmup_minutes", 0.0) * 60
+            cooldown_s = st.session_state.get("single_cooldown_minutes", 0.0) * 60
+            if warmup_s > 0 or cooldown_s > 0:
+                data = trim_session(data, warmup_seconds=warmup_s, cooldown_seconds=cooldown_s)
 
             upload = st.session_state.get("single_upload")
             if upload and upload[1] == "combined":
@@ -742,6 +766,21 @@ if mode == "Single Athlete":
             st.text(format_report(report))
 
 elif mode == "Multiple Athletes":
+    with st.expander("Session trim (optional)"):
+        st.caption(
+            "Trim leading warm-up and/or trailing cool-down from analysis. "
+            "Only start/end trims are supported to preserve accuracy of intensity-specific recommendations."
+        )
+        _mc1, _mc2 = st.columns(2)
+        _mc1.number_input(
+            "Exclude warm-up (minutes)", min_value=0.0, max_value=30.0,
+            value=0.0, step=0.5, key="multi_warmup_minutes",
+        )
+        _mc2.number_input(
+            "Exclude cool-down (minutes)", min_value=0.0, max_value=30.0,
+            value=0.0, step=0.5, key="multi_cooldown_minutes",
+        )
+
     if st.button("Analyse All", type="primary"):
         rows = st.session_state.get("athlete_rows", [])
         valid_rows = [r for r in rows if r["w_file"] and r["r_file"]]
@@ -759,6 +798,10 @@ elif mode == "Multiple Athletes":
                         d = parse_two_files(row["w_file"], row["r_file"])
                         for w in caught:
                             st.warning(f"{row['name']}: {w.message}")
+                    multi_warmup_s = st.session_state.get("multi_warmup_minutes", 0.0) * 60
+                    multi_cooldown_s = st.session_state.get("multi_cooldown_minutes", 0.0) * 60
+                    if multi_warmup_s > 0 or multi_cooldown_s > 0:
+                        d = trim_session(d, warmup_seconds=multi_warmup_s, cooldown_seconds=multi_cooldown_s)
                     meta = _build_metadata(
                         row["name"], conditions_group, sport_key, wearable_type,
                         reference_type, wearable_name, reference_name, str(test_date),
@@ -852,6 +895,21 @@ elif mode == "Multiple Athletes":
 
 else:
     # Compare Devices
+    with st.expander("Session trim (optional)"):
+        st.caption(
+            "Trim leading warm-up and/or trailing cool-down from analysis. "
+            "Only start/end trims are supported to preserve accuracy of intensity-specific recommendations."
+        )
+        _cc1, _cc2 = st.columns(2)
+        _cc1.number_input(
+            "Exclude warm-up (minutes)", min_value=0.0, max_value=30.0,
+            value=0.0, step=0.5, key="comp_warmup_minutes",
+        )
+        _cc2.number_input(
+            "Exclude cool-down (minutes)", min_value=0.0, max_value=30.0,
+            value=0.0, step=0.5, key="comp_cooldown_minutes",
+        )
+
     if st.button("Analyse Devices", type="primary"):
         device_rows = st.session_state.get("device_rows", [])
         valid_devices = [d for d in device_rows if d["file"]]
@@ -863,10 +921,14 @@ else:
             try:
                 devices_input = []
                 ref_file_cmp.seek(0)
+                comp_warmup_s = st.session_state.get("comp_warmup_minutes", 0.0) * 60
+                comp_cooldown_s = st.session_state.get("comp_cooldown_minutes", 0.0) * 60
                 for drow in valid_devices:
                     drow["file"].seek(0)
                     ref_file_cmp.seek(0)
                     d = parse_two_files(drow["file"], ref_file_cmp)
+                    if comp_warmup_s > 0 or comp_cooldown_s > 0:
+                        d = trim_session(d, warmup_seconds=comp_warmup_s, cooldown_seconds=comp_cooldown_s)
                     devices_input.append((drow["name"], drow["wearable_type"], d))
 
                 meta_base = _build_metadata(

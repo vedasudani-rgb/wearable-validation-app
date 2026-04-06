@@ -195,6 +195,29 @@ def align_timeseries(
     return HRDataSeries(hr_wearable=hw, hr_reference=hr, timestamps=t_common)
 
 
+def trim_session(
+    data: HRDataSeries,
+    warmup_seconds: float = 0.0,
+    cooldown_seconds: float = 0.0,
+) -> HRDataSeries:
+    """
+    Return a new HRDataSeries with the leading warm-up and/or trailing
+    cool-down removed. Timestamps retain their original values so that
+    protocol step boundaries (used by check_hr_zone_coverage) still align.
+
+    Only leading/trailing trims are supported. Mid-session exclusion is not
+    provided to preserve the scientific validity of intensity-specific
+    recommendations.
+    """
+    total = data.timestamps[-1]
+    keep = (data.timestamps >= warmup_seconds) & (data.timestamps <= total - cooldown_seconds)
+    return HRDataSeries(
+        hr_wearable=data.hr_wearable[keep],
+        hr_reference=data.hr_reference[keep],
+        timestamps=data.timestamps[keep],
+    )
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 # Column name aliases (lowercase, stripped)

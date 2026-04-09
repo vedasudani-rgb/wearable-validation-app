@@ -17,8 +17,7 @@ python -m unittest discover tests/
 # Run a single test file
 python -m unittest tests/test_analysis.py
 
-# Run a single test class or method
-python -m unittest tests/test_analysis.py::TestQualityLabel
+# Run a single test method
 python -m unittest tests.test_analysis.TestQualityLabel.test_excellent
 
 # CLI demo (single + multi-athlete with synthetic data, no UI)
@@ -53,9 +52,9 @@ CSV/JSON files → parse_*() → align_timeseries() → HRDataSeries
 - **`constants.py`** — every magic number and threshold. Nothing is hardcoded elsewhere. Use-case LoA thresholds here are literature-cited (see inline comments for references).
 - **`protocols.py`** — `generate_protocol()` dispatches to sport/context-specific builders. `_compute_step_boundaries()` produces cumulative timestamps used by `check_hr_zone_coverage()`. Device instructions are fully conditional on `reference_type` (ECG vs HR), `wearable_type` (wrist vs finger), and `sport`.
 - **`io.py`** — `normalise_timestamps()` auto-detects ISO-8601, Unix epoch (seconds/ms), and HH:MM:SS. Decimal minutes are **not** auto-detected (removed: ambiguous with integer seconds). `align_timeseries()` resamples both series to a common 1 Hz grid via linear interpolation. `trim_session(data, warmup_seconds, cooldown_seconds)` removes leading/trailing windows; timestamps are **not** re-zeroed so protocol step boundaries stay aligned.
-- **`analysis.py`** — stateless functions; all accept `HRDataSeries` and return dataclasses. `check_hr_zone_coverage()` uses a `"trimmed"` step status (distinct from `"unknown"`) for steps with zero samples so trimmed warm-up/cool-down windows don't pollute the overall coverage verdict.
+- **`analysis.py`** — stateless functions; all accept `HRDataSeries` and return dataclasses. `check_hr_zone_coverage()` uses a `"trimmed"` step status (distinct from `"unknown"`) for steps with zero samples so trimmed warm-up/cool-down windows don't pollute the overall coverage verdict. `analyze_hr_validation()` computes advanced statistics (Pearson r, R², SEE, parametric bias CI, bootstrap MAPE CI) for n ≥ 3; all are `None` for smaller samples. `_bootstrap_mape_ci()` is a pure-numpy percentile bootstrap (1000 resamples, fixed seed=42 for reproducibility). `analyze_group()` aggregates `mean_pearson_r` and `mean_r_squared` across athletes.
 - **`recommendation.py`** — maps `AnalysisReport` + selected use-case keys to `OnboardingRecommendation`. Thresholds pulled from `constants.USE_CASES`. Internal status key is `"not_recommended"` but displayed as "Accuracy Insufficient" in the UI.
-- **`report.py`** — plain-text formatters and `build_text_blocks()` (called by `analyze_hr_validation`). PPG limitation note is sport-aware (finger PPG + cycling gets handlebar grip note).
+- **`report.py`** — plain-text formatters and `build_text_blocks()` (called by `analyze_hr_validation`). PPG limitation note is sport-aware. `_advanced_stats_block()` appends an `--- ADVANCED STATISTICS ---` section to `format_report()` when advanced stats are present. All label columns use Python `:<N` f-string alignment (metadata: width 10, numerical results + advanced stats: width 26, group stats: width 20) so colons are always at a fixed column.
 - **`plots.py`** — all return `matplotlib.Figure`. Uses `Agg` backend for Streamlit compatibility.
 
 ### Streamlit app (`app.py`)
@@ -66,7 +65,9 @@ Three sections rendered top-to-bottom on every run (Streamlit re-runs the full s
 2. **Upload Session Data** — three modes: Single Athlete, Multiple Athletes, Compare Devices. Files and column mappings stored in session state.
 3. **Analysis Results** — reads from session state; calls analysis functions on "Analyse" button press; stores results back into session state.
 
-Key helpers in `app.py`: `_parse_device_instructions()` / `_render_device_instructions()` parse the plain-text protocol string into sections and render a two-column card layout. `_parse_numbered_section()` and `_parse_bullets_section()` both join multi-line continuation text to the preceding item before flushing. A "Session trim (optional)" expander (warm-up + cool-down number inputs) is rendered in Section 2 for Single Athlete mode and in Section 3 for Multiple Athletes and Compare Devices modes; trim is applied after artifact exclusion, before analysis.
+Key helpers in `app.py`: `_parse_device_instructions()` / `_render_device_instructions()` parse the plain-text protocol string into sections and render a two-column card layout. `_parse_numbered_section()` and `_parse_bullets_section()` handle multi-line continuation. Session trim (warm-up + cool-down) is applied after artifact exclusion, before analysis.
+
+**Advanced Statistics expander** (Single Athlete mode): collapsed by default, sits between the primary 6-column metrics row and the Onboarding Recommendation. Row 1 — 3 columns: Pearson r, R², SEE. Row 2 — 2 columns: Bias 95% CI, MAPE 95% CI (2-column layout prevents value truncation). Metrics are centred via a scoped CSS block injected inside the expander. All `st.metric()` calls throughout the analysis section carry a `help=` tooltip with a plain-English description and literature citation. Multiple Athletes mode adds Pearson r, R², SEE columns to the per-athlete table and a "Group Advanced Statistics" expander. Device Comparison mode adds those three columns to the device ranking table.
 
 ### Supported values
 
@@ -88,6 +89,5 @@ Live at `wearable-validation-app.streamlit.app` (private repo: `vedasudani-rgb/w
 
 Approved features not yet implemented:
 
-- **Additional statistics** — Pearson r, R², SEE (standard error of the estimate); confidence intervals on MAPE and bias.
 - **Structured export** — Excel/CSV download of analysis results (per-athlete metrics + group summary).
 - **Longitudinal device tracking** — compare the same device across multiple test dates to track performance over time.

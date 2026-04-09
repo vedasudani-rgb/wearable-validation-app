@@ -29,15 +29,20 @@ def format_report(report: AnalysisReport) -> str:
     meta = report.metadata
     device_line = ""
     if meta:
+        # Metadata labels padded to width 10 so colons align at position 12.
+        MW = 10
         device_line = (
-            f"  Athlete  : {meta.athlete_name}\n"
-            f"  Wearable : {meta.wearable_device_name} ({meta.wearable_type})\n"
-            f"  Reference: {meta.reference_device_name} ({meta.reference_type})\n"
-            f"  Date     : {meta.test_date}\n"
+            f"  {'Athlete':<{MW}}: {meta.athlete_name}\n"
+            f"  {'Wearable':<{MW}}: {meta.wearable_device_name} ({meta.wearable_type})\n"
+            f"  {'Reference':<{MW}}: {meta.reference_device_name} ({meta.reference_type})\n"
+            f"  {'Date':<{MW}}: {meta.test_date}\n"
         )
         if meta.conditions:
-            device_line += f"  Conditions: {meta.conditions}\n"
+            device_line += f"  {'Conditions':<{MW}}: {meta.conditions}\n"
 
+    _adv = _advanced_stats_block(report)
+    # All labels padded to width 26 so the colon column is always at position 28.
+    W = 26
     return (
         f"{'='*62}\n"
         f"  WEARABLE HR VALIDATION REPORT\n"
@@ -45,13 +50,14 @@ def format_report(report: AnalysisReport) -> str:
         f"{device_line}"
         f"\n--- SUMMARY ---\n{report.summary_text}\n"
         f"\n--- NUMERICAL RESULTS ---\n"
-        f"  Bias (mean error)        : {report.bias:+.2f} BPM\n"
-        f"  MAE                      : {report.mae:.2f} BPM\n"
-        f"  MAPE                     : {report.mape:.2f}%\n"
-        f"  Limits of Agreement (95%): [{report.loa_lower:.2f}, {report.loa_upper:.2f}] BPM\n"
-        f"  Paired samples (N)       : {report.n_samples}\n"
-        f"  Outliers flagged (>2 SD) : {report.n_outliers_flagged}\n"
-        f"  Quality label            : {QUALITY_LABELS[report.quality_label]}\n"
+        f"  {'Bias (mean error)':<{W}}: {report.bias:+.2f} BPM\n"
+        f"  {'MAE':<{W}}: {report.mae:.2f} BPM\n"
+        f"  {'MAPE':<{W}}: {report.mape:.2f}%\n"
+        f"  {'Limits of Agreement (95%)':<{W}}: [{report.loa_lower:.2f}, {report.loa_upper:.2f}] BPM\n"
+        f"  {'Paired samples (N)':<{W}}: {report.n_samples}\n"
+        f"  {'Outliers flagged (>2 SD)':<{W}}: {report.n_outliers_flagged}\n"
+        f"  {'Quality label':<{W}}: {QUALITY_LABELS[report.quality_label]}\n"
+        f"{_adv}"
         f"\n--- INTERPRETATION ---\n{report.interpretation_text}\n"
         f"\n--- LIMITATIONS ---\n{report.limitations_text}\n"
         f"{'='*62}\n"
@@ -63,10 +69,23 @@ def format_group_report(group_report: GroupAnalysisReport) -> str:
     per_athlete = ""
     for r in group_report.athlete_reports:
         name = r.metadata.athlete_name if r.metadata else "Unknown"
+        adv = ""
+        if r.pearson_r is not None:
+            adv = f"  r={r.pearson_r:.4f}  R²={r.r_squared:.4f}  SEE={r.see:.3f} BPM"
         per_athlete += (
             f"  {name:<20} MAPE={r.mape:.1f}%  Bias={r.bias:+.1f} BPM  "
             f"MAE={r.mae:.1f} BPM  LoA=[{r.loa_lower:.1f}, {r.loa_upper:.1f}]  "
-            f"{QUALITY_LABELS[r.quality_label]}\n"
+            f"{QUALITY_LABELS[r.quality_label]}{adv}\n"
+        )
+
+    # Group stats labels padded to width 20 so colons align at position 22.
+    GW = 20
+    mean_r2 = "Mean R\u00b2"
+    _adv_group = ""
+    if group_report.mean_pearson_r is not None:
+        _adv_group = (
+            f"  {'Mean Pearson r':<{GW}}: {group_report.mean_pearson_r:.4f}\n"
+            f"  {mean_r2:<{GW}}: {group_report.mean_r_squared:.4f}\n"
         )
 
     return (
@@ -76,11 +95,12 @@ def format_group_report(group_report: GroupAnalysisReport) -> str:
         f"\n--- GROUP SUMMARY ---\n{group_report.group_summary_text}\n"
         f"\n--- PER-ATHLETE RESULTS ---\n{per_athlete}"
         f"\n--- GROUP STATISTICS ---\n"
-        f"  Mean MAPE         : {group_report.mean_mape:.2f}% ± {group_report.sd_mape:.2f}%\n"
-        f"  Mean Bias         : {group_report.mean_bias:+.2f} ± {group_report.sd_bias:.2f} BPM\n"
-        f"  Mean MAE          : {group_report.mean_mae:.2f} ± {group_report.sd_mae:.2f} BPM\n"
-        f"  Pooled LoA (95%)  : [{group_report.pooled_loa_lower:.2f}, {group_report.pooled_loa_upper:.2f}] BPM\n"
-        f"  Group quality     : {QUALITY_LABELS[group_report.group_quality_label]}\n"
+        f"  {'Mean MAPE':<{GW}}: {group_report.mean_mape:.2f}% \u00b1 {group_report.sd_mape:.2f}%\n"
+        f"  {'Mean Bias':<{GW}}: {group_report.mean_bias:+.2f} \u00b1 {group_report.sd_bias:.2f} BPM\n"
+        f"  {'Mean MAE':<{GW}}: {group_report.mean_mae:.2f} \u00b1 {group_report.sd_mae:.2f} BPM\n"
+        f"  {'Pooled LoA (95%)':<{GW}}: [{group_report.pooled_loa_lower:.2f}, {group_report.pooled_loa_upper:.2f}] BPM\n"
+        f"  {'Group quality':<{GW}}: {QUALITY_LABELS[group_report.group_quality_label]}\n"
+        f"{_adv_group}"
         f"\n--- LIMITATIONS ---\n"
         f"  - Results based on a single session per athlete. Replication is required.\n"
         f"  - Pooled LoA assume all athletes used the same device model and protocol.\n"
@@ -88,6 +108,27 @@ def format_group_report(group_report: GroupAnalysisReport) -> str:
         f"    differences in skin tone, wrist circumference, or movement patterns.\n"
         f"  - These thresholds are heuristic. LoA are the primary validity indicator.\n"
         f"{'='*62}\n"
+    )
+
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+def _advanced_stats_block(report: AnalysisReport) -> str:
+    """Return the advanced statistics section for the text report, or '' if unavailable."""
+    if report.pearson_r is None:
+        return ""
+    # Same label width as NUMERICAL RESULTS (26) so the colon column stays at 28.
+    W = 26
+    r2 = "R\u00b2"
+    return (
+        f"\n--- ADVANCED STATISTICS ---\n"
+        f"  {'Pearson r':<{W}}: {report.pearson_r:.4f}\n"
+        f"  {r2:<{W}}: {report.r_squared:.4f}\n"
+        f"  {'SEE':<{W}}: {report.see:.3f} BPM\n"
+        f"  {'Bias 95% CI (parametric)':<{W}}: [{report.bias_ci_lower:+.2f}, {report.bias_ci_upper:+.2f}] BPM\n"
+        f"  {'MAPE 95% CI (bootstrap)':<{W}}: [{report.mape_ci_lower:.2f}%, {report.mape_ci_upper:.2f}%]\n"
+        f"  Note: r/R\u00b2 are secondary to LoA (Atkinson & Nevill 1998).\n"
+        f"        Bootstrap CI: 1000 resamples (Efron & Tibshirani 1993).\n"
     )
 
 

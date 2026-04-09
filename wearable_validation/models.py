@@ -94,6 +94,18 @@ class AnalysisReport:
     interpretation_text: str
     limitations_text: str
     metadata: Optional[TestRunMetadata] = None
+    # Advanced statistics (None if n < 3) ─────────────────────────────────────
+    # Pearson r / R²: Atkinson & Nevill (1998) Sports Med 26(4):217-238
+    # SEE:            Hopkins (2000) Sports Med 30(1):1-15
+    # Bias 95% CI:    Bland & Altman (1999) Stat Methods Med Res 8(2):135-160
+    # MAPE 95% CI:    Efron & Tibshirani (1993) Bootstrap, Ch 13 (percentile)
+    pearson_r:     Optional[float] = None
+    r_squared:     Optional[float] = None
+    see:           Optional[float] = None   # SD_diff × √(1 − r²), BPM
+    bias_ci_lower: Optional[float] = None   # parametric 95% CI lower
+    bias_ci_upper: Optional[float] = None   # parametric 95% CI upper
+    mape_ci_lower: Optional[float] = None   # bootstrap 95% CI lower
+    mape_ci_upper: Optional[float] = None   # bootstrap 95% CI upper
 
 
 # ── Intensity-stratified accuracy ─────────────────────────────────────────────
@@ -216,3 +228,5 @@ class GroupAnalysisReport:
     n_athletes: int
     group_quality_label: str
     group_summary_text: str
+    mean_pearson_r: Optional[float] = None  # mean r across athletes
+    mean_r_squared: Optional[float] = None  # mean R² across athletes

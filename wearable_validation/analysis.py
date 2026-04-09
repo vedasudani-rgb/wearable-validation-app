@@ -43,6 +43,25 @@ def analyze_hr_validation(
     loa_lower = bias - LOA_Z * sd_diff
     loa_upper = bias + LOA_Z * sd_diff
     n_outliers = int(np.sum(np.abs(diff - bias) > 2 * sd_diff)) if sd_diff > 0 else 0
+
+    # ── Advanced statistics ────────────────────────────────────────────────────
+    if n >= 3:
+        if sd_diff == 0.0:
+            # Constant offset → r is analytically 1, SEE = 0
+            pearson_r, r_squared, see = 1.0, 1.0, 0.0
+            bias_ci_lower = bias_ci_upper = bias
+        else:
+            pearson_r  = float(np.clip(np.corrcoef(w, r)[0, 1], -1.0, 1.0))
+            r_squared  = float(pearson_r ** 2)
+            see        = float(sd_diff * np.sqrt(max(0.0, 1.0 - r_squared)))
+            se_bias    = sd_diff / np.sqrt(n)
+            bias_ci_lower = float(bias - LOA_Z * se_bias)
+            bias_ci_upper = float(bias + LOA_Z * se_bias)
+        mape_ci_lower, mape_ci_upper = _bootstrap_mape_ci(w, r)
+    else:
+        pearson_r = r_squared = see = None
+        bias_ci_lower = bias_ci_upper = mape_ci_lower = mape_ci_upper = None
+
     quality   = _quality_label(mape)
 
     summary, interpretation, limitations = _report_module.build_text_blocks(
@@ -61,6 +80,13 @@ def analyze_hr_validation(
         interpretation_text=interpretation,
         limitations_text=limitations,
         metadata=metadata,
+        pearson_r=pearson_r,
+        r_squared=r_squared,
+        see=see,
+        bias_ci_lower=bias_ci_lower,
+        bias_ci_upper=bias_ci_upper,
+        mape_ci_lower=mape_ci_lower,
+        mape_ci_upper=mape_ci_upper,
     )
 
 
@@ -321,6 +347,11 @@ def analyze_group(
     mean_mae  = float(np.mean(maes))
     sd_mae    = float(np.std(maes,   ddof=1)) if len(maes)   > 1 else 0.0
 
+    r_vals  = [rep.pearson_r for rep in reports if rep.pearson_r is not None]
+    r2_vals = [rep.r_squared for rep in reports if rep.r_squared is not None]
+    mean_pearson_r = float(np.mean(r_vals))  if r_vals  else None
+    mean_r_squared = float(np.mean(r2_vals)) if r2_vals else None
+
     group_quality = _quality_label(mean_mape)
     n = len(reports)
     direction = "overestimates" if mean_bias > 0 else "underestimates"
@@ -343,6 +374,8 @@ def analyze_group(
         n_athletes=n,
         group_quality_label=group_quality,
         group_summary_text=group_summary,
+        mean_pearson_r=mean_pearson_r,
+        mean_r_squared=mean_r_squared,
     )
 
 
@@ -368,3 +401,24 @@ def _quality_label(mape: float) -> str:
     elif mape < MAPE_ACCEPTABLE_THRESHOLD:
         return "acceptable"
     return "poor"
+
+
+def _bootstrap_mape_ci(
+    w: np.ndarray,
+    r: np.ndarray,
+    n_resamples: int = 1000,
+    seed: int = 42,
+) -> tuple[float, float]:
+    """
+    Percentile bootstrap 95% CI for MAPE (non-parametric).
+    Avoids normality assumption on MAPE distribution.
+    Efron & Tibshirani (1993) 'An Introduction to the Bootstrap', Ch 13.
+    Fixed seed for reproducibility.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(w)
+    boots = np.empty(n_resamples)
+    for i in range(n_resamples):
+        idx = rng.integers(0, n, size=n)
+        boots[i] = float(np.mean(np.abs(w[idx] - r[idx]) / r[idx]) * 100)
+    return float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))

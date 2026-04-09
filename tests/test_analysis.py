@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 
 from wearable_validation.models import HRDataSeries, TestRunMetadata
-from wearable_validation.analysis import analyze_hr_validation, analyze_group, _quality_label
+from wearable_validation.analysis import analyze_hr_validation, analyze_group, _quality_label, _bootstrap_mape_ci
 from wearable_validation.protocols import generate_protocol, compute_hrmax
 from wearable_validation.models import ProtocolParams
 
@@ -240,6 +240,102 @@ class TestGroupAnalysis(unittest.TestCase):
     def test_length_mismatch_raises(self):
         with self.assertRaises(ValueError):
             analyze_group(self.reports, self.datasets[:2])
+
+
+class TestAdvancedStatistics(unittest.TestCase):
+    """Advanced stats: Pearson r, R², SEE, and 95% CIs on bias and MAPE."""
+
+    def setUp(self):
+        rng = np.random.default_rng(99)
+        self.meta = _make_metadata()
+        # Perfect: wearable == reference
+        ref_perfect = rng.uniform(120, 180, size=200)
+        self.data_perfect = _make_data(ref_perfect.copy(), ref_perfect)
+        # Constant offset: wearable = reference + 5 BPM (perfect correlation)
+        ref_offset = rng.uniform(120, 180, size=200)
+        self.data_offset = _make_data(ref_offset + 5.0, ref_offset)
+        # Random noise: wearable = reference + N(0, 8)
+        ref_noise = rng.uniform(120, 180, size=300)
+        noise = rng.normal(0, 8.0, size=300)
+        self.data_noise = _make_data(ref_noise + noise, ref_noise)
+
+    def test_perfect_correlation(self):
+        r = analyze_hr_validation(self.data_perfect, self.meta)
+        self.assertAlmostEqual(r.pearson_r, 1.0, places=5)
+        self.assertAlmostEqual(r.r_squared, 1.0, places=5)
+        self.assertAlmostEqual(r.see, 0.0, places=5)
+        self.assertAlmostEqual(r.bias_ci_lower, 0.0, places=5)
+        self.assertAlmostEqual(r.bias_ci_upper, 0.0, places=5)
+        self.assertAlmostEqual(r.mape_ci_lower, 0.0, places=5)
+        self.assertAlmostEqual(r.mape_ci_upper, 0.0, places=5)
+
+    def test_constant_offset_correlation(self):
+        # Constant shift preserves perfect linear relationship
+        r = analyze_hr_validation(self.data_offset, self.meta)
+        self.assertAlmostEqual(r.pearson_r, 1.0, places=5)
+        self.assertAlmostEqual(r.r_squared, 1.0, places=5)
+        self.assertAlmostEqual(r.see, 0.0, places=5)
+        # CI on bias should collapse to [5.0, 5.0] since variance is zero
+        self.assertAlmostEqual(r.bias_ci_lower, 5.0, places=3)
+        self.assertAlmostEqual(r.bias_ci_upper, 5.0, places=3)
+
+    def test_random_noise_reduces_correlation(self):
+        r = analyze_hr_validation(self.data_noise, self.meta)
+        self.assertGreater(r.pearson_r, 0.0)
+        self.assertLess(r.pearson_r, 1.0)
+        self.assertLessEqual(r.r_squared, r.pearson_r)   # r² ≤ r when 0 < r < 1
+        self.assertGreater(r.see, 0.0)
+        # Bias CI should straddle zero for unbiased noise
+        self.assertLess(r.bias_ci_lower, 0.1)
+        self.assertGreater(r.bias_ci_upper, -0.1)
+        # MAPE CI must be a valid interval
+        self.assertGreater(r.mape_ci_upper, r.mape_ci_lower)
+        self.assertGreater(r.mape_ci_lower, 0.0)
+
+    def test_small_n_returns_none(self):
+        # n = 2 → advanced stats must be None
+        data_tiny = _make_data(
+            np.array([150.0, 155.0]),
+            np.array([150.0, 155.0]),
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            r = analyze_hr_validation(data_tiny, self.meta)
+        self.assertIsNone(r.pearson_r)
+        self.assertIsNone(r.r_squared)
+        self.assertIsNone(r.see)
+        self.assertIsNone(r.bias_ci_lower)
+        self.assertIsNone(r.bias_ci_upper)
+        self.assertIsNone(r.mape_ci_lower)
+        self.assertIsNone(r.mape_ci_upper)
+
+    def test_bootstrap_reproducibility(self):
+        # Same inputs + seed → identical bounds every call
+        rng = np.random.default_rng(5)
+        ref = rng.uniform(130, 170, size=100)
+        w   = ref + rng.normal(0, 5, size=100)
+        lo1, hi1 = _bootstrap_mape_ci(w, ref, seed=42)
+        lo2, hi2 = _bootstrap_mape_ci(w, ref, seed=42)
+        self.assertEqual(lo1, lo2)
+        self.assertEqual(hi1, hi2)
+        self.assertGreater(hi1, lo1)
+        self.assertGreater(lo1, 0.0)
+
+    def test_group_aggregates_r_and_r_squared(self):
+        # analyze_group should populate mean_pearson_r and mean_r_squared
+        rng = np.random.default_rng(11)
+        reports, datasets = [], []
+        for i in range(3):
+            ref = rng.uniform(130, 175, size=200)
+            wear = ref + rng.normal(0, 4.0, 200)
+            data = _make_data(wear, ref)
+            datasets.append(data)
+            reports.append(analyze_hr_validation(data, _make_metadata(f"A{i}")))
+        g = analyze_group(reports, datasets)
+        self.assertIsNotNone(g.mean_pearson_r)
+        self.assertIsNotNone(g.mean_r_squared)
+        self.assertGreater(g.mean_pearson_r, 0.0)
+        self.assertLessEqual(g.mean_pearson_r, 1.0)
 
 
 if __name__ == "__main__":

@@ -724,12 +724,89 @@ if mode == "Single Athlete":
 
         # Metrics row
         m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Bias",      f"{report.bias:+.2f} BPM")
-        m2.metric("MAE",       f"{report.mae:.2f} BPM")
-        m3.metric("MAPE",      f"{report.mape:.2f}%")
-        m4.metric("LoA Lower", f"{report.loa_lower:.1f} BPM")
-        m5.metric("LoA Upper", f"{report.loa_upper:.1f} BPM")
-        m6.metric("N samples", f"{report.n_samples:,}")
+        m1.metric(
+            "Bias",
+            f"{report.bias:+.2f} BPM",
+            help="Average difference (wearable \u2212 reference). Positive = reads too high; negative = reads too low. A well-calibrated device should be close to 0 BPM. Bland & Altman (1986).",
+        )
+        m2.metric(
+            "MAE",
+            f"{report.mae:.2f} BPM",
+            help="Mean Absolute Error \u2014 average size of errors regardless of direction. Unlike Bias, opposing errors do not cancel each other out. Lower is better.",
+        )
+        m3.metric(
+            "MAPE",
+            f"{report.mape:.2f}%",
+            help="Mean Absolute Percentage Error \u2014 error as a % of true HR, making accuracy comparable across effort levels. < 3% = excellent, < 5% = good, < 10% = acceptable. Navalta et al. (2020), INTERLIVE (2020).",
+        )
+        m4.metric(
+            "LoA Lower",
+            f"{report.loa_lower:.1f} BPM",
+            help="Lower bound of Bland-Altman 95% Limits of Agreement. 95% of individual readings fall above this value relative to the reference. The LoA span is the primary validity indicator. Bland & Altman (1986).",
+        )
+        m5.metric(
+            "LoA Upper",
+            f"{report.loa_upper:.1f} BPM",
+            help="Upper bound of Bland-Altman 95% Limits of Agreement. 95% of individual readings fall below this value relative to the reference. The LoA span is the primary validity indicator. Bland & Altman (1986).",
+        )
+        m6.metric(
+            "N samples",
+            f"{report.n_samples:,}",
+            help="Number of valid paired HR readings used in the analysis. Reliable LoA estimates require \u2265 100 samples. Results from fewer samples should be interpreted with caution.",
+        )
+
+        # Advanced statistics (collapsed by default — primary metrics stay prominent)
+        with st.expander("Advanced Statistics", expanded=False):
+            st.markdown(
+                """
+                <style>
+                div[data-testid="stExpander"] [data-testid="stMetricLabel"],
+                div[data-testid="stExpander"] [data-testid="stMetricLabel"] p,
+                div[data-testid="stExpander"] [data-testid="stMetricValue"] {
+                    text-align: center;
+                    width: 100%;
+                    display: block;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            if report.pearson_r is not None:
+                # Row 1: correlation stats (short values — 3 columns works cleanly)
+                ac1, ac2, ac3 = st.columns(3)
+                ac1.metric(
+                    "Pearson r",
+                    f"{report.pearson_r:.4f}",
+                    help="Correlation coefficient measuring how well the wearable tracks the shape of reference HR. High r (close to 1.0) indicates good tracking but does not confirm accurate values \u2014 secondary to LoA. Atkinson & Nevill (1998) Sports Med 26(4):217\u2013238.",
+                )
+                ac2.metric(
+                    "R\u00b2",
+                    f"{report.r_squared:.4f}",
+                    help="Proportion of reference HR variance explained by the wearable (= Pearson r\u00b2). A value of 0.95 means 95% of the variation is captured. Standard form of r for publication reporting.",
+                )
+                ac3.metric(
+                    "SEE",
+                    f"{report.see:.2f} BPM",
+                    help="Standard Error of the Estimate: SD_diff \u00d7 \u221a(1\u2212r\u00b2). Combines tracking quality and error spread into a single BPM value. Closer to 0 is better. Hopkins (2000) Sports Med 30(1):1\u201315.",
+                )
+                # Row 2: confidence intervals (longer values — 2 columns gives adequate width)
+                bc1, bc2 = st.columns(2)
+                bc1.metric(
+                    "Bias 95% CI",
+                    f"{report.bias_ci_lower:+.2f} to {report.bias_ci_upper:+.2f} BPM",
+                    help="Confidence interval for the bias estimate. A narrow CI means the bias is well-characterised; a wide CI means more data is needed. Parametric method: bias \u00b1 1.96\u00d7(SD/\u221an). Bland & Altman (1999) Stat Methods Med Res 8(2):135\u2013160.",
+                )
+                bc2.metric(
+                    "MAPE 95% CI",
+                    f"{report.mape_ci_lower:.2f}% to {report.mape_ci_upper:.2f}%",
+                    help="Confidence interval for MAPE, calculated by bootstrapping (1000 resamples). A narrow CI confirms the MAPE estimate is reliable. Non-parametric percentile method avoids normality assumption on MAPE. Efron & Tibshirani (1993).",
+                )
+                st.caption(
+                    "r and R\u00b2 are secondary indicators \u2014 LoA is the primary validity measure "
+                    "(Atkinson & Nevill 1998, *Sports Med* 26(4):217\u2013238)."
+                )
+            else:
+                st.info("Advanced statistics require \u2265 3 paired samples.")
 
         # Onboarding recommendation
         if rec:
@@ -850,6 +927,9 @@ elif mode == "Multiple Athletes":
                 "LoA Lower":  round(r.loa_lower, 2),
                 "LoA Upper":  round(r.loa_upper, 2),
                 "Quality":    QUALITY_LABELS[r.quality_label],
+                "Pearson r":  round(r.pearson_r, 4) if r.pearson_r is not None else "\u2014",
+                "R\u00b2":        round(r.r_squared, 4) if r.r_squared is not None else "\u2014",
+                "SEE (BPM)":  round(r.see, 3)       if r.see       is not None else "\u2014",
             }
             if artifact_counts:
                 row["Artifacts"] = artifact_counts[i]
@@ -862,6 +942,16 @@ elif mode == "Multiple Athletes":
         g2.metric("Mean Bias",  f"{group.mean_bias:+.2f} ± {group.sd_bias:.2f} BPM")
         g3.metric("Pooled LoA", f"[{group.pooled_loa_lower:.1f}, {group.pooled_loa_upper:.1f}]")
         g4.metric("Athletes",   group.n_athletes)
+
+        # Group advanced statistics (collapsed)
+        with st.expander("Group Advanced Statistics", expanded=False):
+            if group.mean_pearson_r is not None:
+                ga1, ga2 = st.columns(2)
+                ga1.metric("Mean Pearson r", f"{group.mean_pearson_r:.4f}")
+                ga2.metric("Mean R\u00b2",       f"{group.mean_r_squared:.4f}")
+                st.caption("Per-athlete bias/MAPE CIs are shown in the Full Group Report.")
+            else:
+                st.info("No advanced statistics available.")
 
         # Group plots
         tab1, tab2, tab3 = st.tabs(["Per-Athlete Bland-Altman", "Pooled Bland-Altman", "Individual Scatter"])
@@ -973,6 +1063,9 @@ else:
                 "LoA Lower":   round(entry.report.loa_lower, 2),
                 "LoA Upper":   round(entry.report.loa_upper, 2),
                 "Quality":     QUALITY_LABELS[entry.report.quality_label],
+                "Pearson r":   round(entry.report.pearson_r, 4) if entry.report.pearson_r is not None else "\u2014",
+                "R\u00b2":        round(entry.report.r_squared, 4) if entry.report.r_squared is not None else "\u2014",
+                "SEE (BPM)":   round(entry.report.see, 3)       if entry.report.see       is not None else "\u2014",
             })
         st.dataframe(pd.DataFrame(rank_rows), use_container_width=True, hide_index=True)
 

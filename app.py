@@ -53,6 +53,21 @@ st.caption(
     "against a reference standard, then upload session data for analysis."
 )
 
+# ── Global style fixes ────────────────────────────────────────────────────────
+# Normalize the gap between metric label text and its tooltip (?) button so
+# it is consistent across all st.metric() calls on the page.
+st.markdown(
+    """
+    <style>
+    [data-testid="stMetricLabel"] > div {
+        gap: 0.25rem;
+        align-items: center;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -324,6 +339,61 @@ def _render_coverage(coverage):
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     if coverage.warning_message:
         st.warning(coverage.warning_message)
+
+
+def _adv_metric_card(col, label: str, value: str, help_text: str) -> None:
+    """
+    Render a centred metric card inside `col` for the Advanced Statistics expander.
+    Uses custom HTML so centering and tooltip-icon spacing are pixel-perfect,
+    independent of Streamlit's internal metric layout.
+    The visual style (typography, opacity) mirrors st.metric().
+    """
+    safe_help = help_text.replace('"', "&quot;").replace("'", "&#39;")
+    col.markdown(
+        f"""
+        <div style="padding:0.85rem 0.25rem 0.6rem; text-align:center;">
+            <div style="
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                gap:0.3rem;
+                font-size:0.875rem;
+                font-weight:400;
+                opacity:0.65;
+                margin-bottom:0.4rem;
+                line-height:1.4;
+            ">
+                <span>{label}</span>
+                <span
+                    title="{safe_help}"
+                    style="
+                        cursor:help;
+                        display:inline-flex;
+                        align-items:center;
+                        justify-content:center;
+                        width:0.9rem;
+                        height:0.9rem;
+                        border-radius:50%;
+                        border:1.5px solid currentColor;
+                        font-size:0.6rem;
+                        font-weight:700;
+                        opacity:0.8;
+                        flex-shrink:0;
+                        line-height:1;
+                        vertical-align:middle;
+                    "
+                >?</span>
+            </div>
+            <div style="
+                font-size:1.75rem;
+                font-weight:700;
+                letter-spacing:-0.02em;
+                line-height:1.2;
+            ">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _render_recommendation(rec):
@@ -757,49 +827,32 @@ if mode == "Single Athlete":
 
         # Advanced statistics (collapsed by default — primary metrics stay prominent)
         with st.expander("Advanced Statistics", expanded=False):
-            st.markdown(
-                """
-                <style>
-                div[data-testid="stExpander"] [data-testid="stMetricLabel"],
-                div[data-testid="stExpander"] [data-testid="stMetricLabel"] p,
-                div[data-testid="stExpander"] [data-testid="stMetricValue"] {
-                    text-align: center;
-                    width: 100%;
-                    display: block;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
             if report.pearson_r is not None:
-                # Row 1: correlation stats (short values — 3 columns works cleanly)
+                # Row 1: correlation stats — 3 equal columns
                 ac1, ac2, ac3 = st.columns(3)
-                ac1.metric(
-                    "Pearson r",
-                    f"{report.pearson_r:.4f}",
-                    help="Correlation coefficient measuring how well the wearable tracks the shape of reference HR. High r (close to 1.0) indicates good tracking but does not confirm accurate values \u2014 secondary to LoA. Atkinson & Nevill (1998) Sports Med 26(4):217\u2013238.",
+                _adv_metric_card(
+                    ac1, "Pearson r", f"{report.pearson_r:.4f}",
+                    "Correlation coefficient measuring how well the wearable tracks the shape of reference HR. High r (close to 1.0) indicates good tracking but does not confirm accurate values \u2014 secondary to LoA. Atkinson & Nevill (1998) Sports Med 26(4):217\u2013238.",
                 )
-                ac2.metric(
-                    "R\u00b2",
-                    f"{report.r_squared:.4f}",
-                    help="Proportion of reference HR variance explained by the wearable (= Pearson r\u00b2). A value of 0.95 means 95% of the variation is captured. Standard form of r for publication reporting.",
+                _adv_metric_card(
+                    ac2, "R\u00b2", f"{report.r_squared:.4f}",
+                    "Proportion of reference HR variance explained by the wearable (= Pearson r\u00b2). A value of 0.95 means 95% of the variation is captured. Standard form of r for publication reporting.",
                 )
-                ac3.metric(
-                    "SEE",
-                    f"{report.see:.2f} BPM",
-                    help="Standard Error of the Estimate: SD_diff \u00d7 \u221a(1\u2212r\u00b2). Combines tracking quality and error spread into a single BPM value. Closer to 0 is better. Hopkins (2000) Sports Med 30(1):1\u201315.",
+                _adv_metric_card(
+                    ac3, "SEE", f"{report.see:.2f} BPM",
+                    "Standard Error of the Estimate: SD_diff \u00d7 \u221a(1\u2212r\u00b2). Combines tracking quality and error spread into a single BPM value. Closer to 0 is better. Hopkins (2000) Sports Med 30(1):1\u201315.",
                 )
-                # Row 2: confidence intervals (longer values — 2 columns gives adequate width)
+                # Row 2: confidence intervals — 2 columns for adequate width
                 bc1, bc2 = st.columns(2)
-                bc1.metric(
-                    "Bias 95% CI",
+                _adv_metric_card(
+                    bc1, "Bias 95% CI",
                     f"{report.bias_ci_lower:+.2f} to {report.bias_ci_upper:+.2f} BPM",
-                    help="Confidence interval for the bias estimate. A narrow CI means the bias is well-characterised; a wide CI means more data is needed. Parametric method: bias \u00b1 1.96\u00d7(SD/\u221an). Bland & Altman (1999) Stat Methods Med Res 8(2):135\u2013160.",
+                    "Confidence interval for the bias estimate. A narrow CI means the bias is well-characterised; a wide CI means more data is needed. Parametric method: bias \u00b1 1.96\u00d7(SD/\u221an). Bland & Altman (1999) Stat Methods Med Res 8(2):135\u2013160.",
                 )
-                bc2.metric(
-                    "MAPE 95% CI",
+                _adv_metric_card(
+                    bc2, "MAPE 95% CI",
                     f"{report.mape_ci_lower:.2f}% to {report.mape_ci_upper:.2f}%",
-                    help="Confidence interval for MAPE, calculated by bootstrapping (1000 resamples). A narrow CI confirms the MAPE estimate is reliable. Non-parametric percentile method avoids normality assumption on MAPE. Efron & Tibshirani (1993).",
+                    "Confidence interval for MAPE, calculated by bootstrapping (1000 resamples). A narrow CI confirms the MAPE estimate is reliable. Non-parametric percentile method avoids normality assumption on MAPE. Efron & Tibshirani (1993).",
                 )
                 st.caption(
                     "r and R\u00b2 are secondary indicators \u2014 LoA is the primary validity measure "

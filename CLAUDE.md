@@ -91,3 +91,20 @@ Approved features not yet implemented:
 
 - **Structured export** — Excel/CSV download of analysis results (per-athlete metrics + group summary).
 - **Longitudinal device tracking** — compare the same device across multiple test dates to track performance over time.
+
+### Known issues / future improvements
+
+**Compare Devices mode**
+- Only one device's plots are visible at a time; need a clean multi-device graph layout (e.g. tabs or per-device expanders).
+- Device ranking table shows Pearson r, R², SEE but is missing the CI columns (Bias 95% CI, MAPE 95% CI).
+- Artifact flags are not surfaced in the device ranking table (unlike per-athlete table in Multi-Athlete mode).
+- Graphs in the analysis section do not clear when files are removed from the wearable or reference upload widgets.
+
+**Multi-Athlete mode**
+- Intensity-bin graph (plot_intensity_bins) is not displayed per athlete.
+- Graphs in the analysis section do not clear when files are removed from the upload widgets.
+- Metric cards in the per-athlete results table lack hover tooltips (unlike Single Athlete mode which uses `st.metric(help=...)`).
+
+**General**
+- Tooltips (`help=` text) are absent for stats displayed in Multi-Athlete and Device Comparison modes (both use DataFrame tables rather than `st.metric()`).
+- Session trim (warm-up / cool-down removal) is only exposed in Single Athlete mode; no equivalent control exists for Multi-Athlete or Device Comparison modes.

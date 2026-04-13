@@ -67,6 +67,15 @@ Three sections rendered top-to-bottom on every run (Streamlit re-runs the full s
 
 Key helpers in `app.py`: `_parse_device_instructions()` / `_render_device_instructions()` parse the plain-text protocol string into sections and render a two-column card layout. `_parse_numbered_section()` and `_parse_bullets_section()` handle multi-line continuation. Session trim (warm-up + cool-down) is applied after artifact exclusion, before analysis.
 
+**Export helpers** (all in `app.py`, defined after `_make_pdf()`):
+- `_make_pdf(figures, text_pages=None)` — prepends monospace text pages (US Letter, fontsize 7, chunked at 85 lines) before graphs using `matplotlib.PdfPages`. Text pages render `format_report()` / `format_group_report()` output; device comparison uses `_format_device_comparison_text()`.
+- `_make_single_csv(report)` — 18-column single-row CSV: athlete/device/date metadata + bias, MAE, MAPE, LoA, n_samples, outliers, quality, and all seven advanced stats fields (empty string for absent optional values).
+- `_make_group_csv(group)` — per-athlete rows (same 18 columns) + a `GROUP_SUMMARY` row with pooled/mean stats.
+- `_make_comparison_csv(cmp_report)` — per-device rows with rank + wearable_type prepended + all 15 numeric stat columns.
+- `_format_device_comparison_text(cmp_report)` — builds a fixed-width text report for device comparison PDFs (no equivalent in `report.py`); uses `QUALITY_LABELS` from constants.
+
+Each mode's export UI is a `st.columns(2)` row: `📄 Download PDF Report` and `📊 Download CSV`, both `use_container_width=True`.
+
 **Advanced Statistics expander** (Single Athlete mode): collapsed by default, sits between the primary 6-column metrics row and the Onboarding Recommendation. Row 1 — 3 columns: Pearson r, R², SEE. Row 2 — 2 columns: Bias 95% CI, MAPE 95% CI (2-column layout prevents value truncation). Cards are rendered via `_adv_metric_card(col, label, value, help_text)` — custom HTML rather than `st.metric()` — so centering and tooltip-icon spacing are pixel-perfect without fighting Streamlit's internal flex layout. The `?` icon uses `inline-flex` with `align-items: center` so it sits flush with the label text. A global `<style>` block injected once after `st.set_page_config` normalises the gap between metric label text and its tooltip button for all `st.metric()` calls on the page. All `st.metric()` calls throughout the analysis section carry a `help=` tooltip with a plain-English description and literature citation. Multiple Athletes mode adds Pearson r, R², SEE columns to the per-athlete table and a "Group Advanced Statistics" expander. Device Comparison mode adds those three columns to the device ranking table.
 
 ### Supported values
@@ -89,7 +98,6 @@ Live at `wearable-validation-app.streamlit.app` (private repo: `vedasudani-rgb/w
 
 Approved features not yet implemented:
 
-- **Structured export** — Excel/CSV download of analysis results (per-athlete metrics + group summary).
 - **Longitudinal device tracking** — compare the same device across multiple test dates to track performance over time.
 
 ### Known issues / future improvements

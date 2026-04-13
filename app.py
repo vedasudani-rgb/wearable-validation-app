@@ -8,6 +8,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
 
 from wearable_validation import (
     ProtocolParams,
@@ -231,13 +232,159 @@ def _render_device_instructions(instructions: str) -> None:
             st.caption(f"*{sec['ref']}*")
 
 
-def _make_pdf(figures: list) -> bytes:
+def _make_pdf(figures: list, text_pages: list[str] | None = None) -> bytes:
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
+        for text in (text_pages or []):
+            lines = text.splitlines()
+            for chunk_start in range(0, max(1, len(lines)), 85):
+                chunk = "\n".join(lines[chunk_start:chunk_start + 85])
+                fig_t = plt.figure(figsize=(8.5, 11))
+                fig_t.patch.set_facecolor("white")
+                fig_t.text(0.05, 0.95, chunk, transform=fig_t.transFigure,
+                           fontsize=7, fontfamily="monospace", verticalalignment="top")
+                pdf.savefig(fig_t, bbox_inches="tight")
+                plt.close(fig_t)
         for fig in figures:
             pdf.savefig(fig, bbox_inches="tight")
     buf.seek(0)
     return buf.read()
+
+
+def _make_single_csv(report) -> bytes:
+    r = report
+    m = r.metadata
+    row = {
+        "athlete_name":       m.athlete_name if m else "",
+        "device_name":        m.wearable_device_name if m else "",
+        "date":               m.test_date if m else "",
+        "bias_bpm":           r.bias,
+        "mae_bpm":            r.mae,
+        "mape_pct":           r.mape,
+        "loa_lower_bpm":      r.loa_lower,
+        "loa_upper_bpm":      r.loa_upper,
+        "n_samples":          r.n_samples,
+        "n_outliers_flagged": r.n_outliers_flagged,
+        "quality_label":      r.quality_label,
+        "pearson_r":          r.pearson_r        if r.pearson_r        is not None else "",
+        "r_squared":          r.r_squared        if r.r_squared        is not None else "",
+        "see_bpm":            r.see              if r.see              is not None else "",
+        "bias_ci_lower_bpm":  r.bias_ci_lower    if r.bias_ci_lower    is not None else "",
+        "bias_ci_upper_bpm":  r.bias_ci_upper    if r.bias_ci_upper    is not None else "",
+        "mape_ci_lower_pct":  r.mape_ci_lower    if r.mape_ci_lower    is not None else "",
+        "mape_ci_upper_pct":  r.mape_ci_upper    if r.mape_ci_upper    is not None else "",
+    }
+    return pd.DataFrame([row]).to_csv(index=False).encode("utf-8")
+
+
+def _make_group_csv(group) -> bytes:
+    rows = []
+    for r in group.athlete_reports:
+        m = r.metadata
+        rows.append({
+            "athlete_name":       m.athlete_name if m else "",
+            "device_name":        m.wearable_device_name if m else "",
+            "date":               m.test_date if m else "",
+            "bias_bpm":           r.bias,
+            "mae_bpm":            r.mae,
+            "mape_pct":           r.mape,
+            "loa_lower_bpm":      r.loa_lower,
+            "loa_upper_bpm":      r.loa_upper,
+            "n_samples":          r.n_samples,
+            "n_outliers_flagged": r.n_outliers_flagged,
+            "quality_label":      r.quality_label,
+            "pearson_r":          r.pearson_r     if r.pearson_r     is not None else "",
+            "r_squared":          r.r_squared     if r.r_squared     is not None else "",
+            "see_bpm":            r.see           if r.see           is not None else "",
+            "bias_ci_lower_bpm":  r.bias_ci_lower if r.bias_ci_lower is not None else "",
+            "bias_ci_upper_bpm":  r.bias_ci_upper if r.bias_ci_upper is not None else "",
+            "mape_ci_lower_pct":  r.mape_ci_lower if r.mape_ci_lower is not None else "",
+            "mape_ci_upper_pct":  r.mape_ci_upper if r.mape_ci_upper is not None else "",
+        })
+    rows.append({
+        "athlete_name":       "GROUP_SUMMARY",
+        "device_name":        "",
+        "date":               "",
+        "bias_bpm":           group.mean_bias,
+        "mae_bpm":            group.mean_mae,
+        "mape_pct":           group.mean_mape,
+        "loa_lower_bpm":      group.pooled_loa_lower,
+        "loa_upper_bpm":      group.pooled_loa_upper,
+        "n_samples":          "",
+        "n_outliers_flagged": "",
+        "quality_label":      group.group_quality_label,
+        "pearson_r":          group.mean_pearson_r  if group.mean_pearson_r  is not None else "",
+        "r_squared":          group.mean_r_squared  if group.mean_r_squared  is not None else "",
+        "see_bpm":            "",
+        "bias_ci_lower_bpm":  "",
+        "bias_ci_upper_bpm":  "",
+        "mape_ci_lower_pct":  "",
+        "mape_ci_upper_pct":  "",
+    })
+    return pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+
+
+def _make_comparison_csv(cmp_report) -> bytes:
+    rows = []
+    for entry in cmp_report.entries:
+        r = entry.report
+        rows.append({
+            "rank":               entry.rank,
+            "device_name":        entry.device_name,
+            "wearable_type":      entry.wearable_type,
+            "bias_bpm":           r.bias,
+            "mae_bpm":            r.mae,
+            "mape_pct":           r.mape,
+            "loa_lower_bpm":      r.loa_lower,
+            "loa_upper_bpm":      r.loa_upper,
+            "n_samples":          r.n_samples,
+            "n_outliers_flagged": r.n_outliers_flagged,
+            "quality_label":      r.quality_label,
+            "pearson_r":          r.pearson_r     if r.pearson_r     is not None else "",
+            "r_squared":          r.r_squared     if r.r_squared     is not None else "",
+            "see_bpm":            r.see           if r.see           is not None else "",
+            "bias_ci_lower_bpm":  r.bias_ci_lower if r.bias_ci_lower is not None else "",
+            "bias_ci_upper_bpm":  r.bias_ci_upper if r.bias_ci_upper is not None else "",
+            "mape_ci_lower_pct":  r.mape_ci_lower if r.mape_ci_lower is not None else "",
+            "mape_ci_upper_pct":  r.mape_ci_upper if r.mape_ci_upper is not None else "",
+        })
+    return pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+
+
+def _format_device_comparison_text(cmp_report) -> str:
+    W = 26
+    lines = [
+        "=" * 62,
+        f"  DEVICE COMPARISON REPORT ({cmp_report.n_devices} devices)",
+        "=" * 62,
+        f"\n  Reference  : {cmp_report.reference_device_name}",
+        f"  Best Device: {cmp_report.best_device_name}",
+        f"\n  SUMMARY\n  {cmp_report.summary_text}",
+        "\n--- PER-DEVICE RESULTS ---",
+    ]
+    for entry in cmp_report.entries:
+        r = entry.report
+        adv_lines = []
+        if r.pearson_r is not None:
+            adv_lines = [
+                f"    {'Pearson r':<{W}}: {r.pearson_r:.4f}",
+                f"    {'R²':<{W}}: {r.r_squared:.4f}",
+                f"    {'SEE':<{W}}: {r.see:.3f} BPM",
+                f"    {'Bias 95% CI (parametric)':<{W}}: [{r.bias_ci_lower:+.2f}, {r.bias_ci_upper:+.2f}] BPM",
+                f"    {'MAPE 95% CI (bootstrap)':<{W}}: [{r.mape_ci_lower:.2f}%, {r.mape_ci_upper:.2f}%]",
+            ]
+        lines += [
+            f"\n  Rank {entry.rank}: {entry.device_name} ({entry.wearable_type})",
+            f"    {'Bias':<{W}}: {r.bias:+.2f} BPM",
+            f"    {'MAE':<{W}}: {r.mae:.2f} BPM",
+            f"    {'MAPE':<{W}}: {r.mape:.2f}%",
+            f"    {'LoA (95%)':<{W}}: [{r.loa_lower:.2f}, {r.loa_upper:.2f}] BPM",
+            f"    {'N samples':<{W}}: {r.n_samples}",
+            f"    {'Outliers flagged':<{W}}: {r.n_outliers_flagged}",
+            f"    {'Quality':<{W}}: {QUALITY_LABELS[r.quality_label]}",
+        ] + adv_lines
+    lines.append("\n" + "=" * 62)
+    return "\n".join(lines)
 
 
 def _build_metadata(
@@ -829,15 +976,27 @@ if mode == "Single Athlete":
         with tab4:
             st.pyplot(fig_bi)
 
-        # PDF export
-        pdf_bytes = _make_pdf([fig_ts, fig_ba, fig_sc, fig_bi])
+        # Export
+        pdf_bytes = _make_pdf([fig_ts, fig_ba, fig_sc, fig_bi], text_pages=[format_report(report)])
+        csv_bytes = _make_single_csv(report)
         athlete_slug = (report.metadata.athlete_name if report.metadata else "report").replace(" ", "_")
-        st.download_button(
-            "⬇ Download Report as PDF",
-            data=pdf_bytes,
-            file_name=f"hr_validation_{athlete_slug}.pdf",
-            mime="application/pdf",
-        )
+        _col_pdf, _col_csv = st.columns(2)
+        with _col_pdf:
+            st.download_button(
+                "📄 Download PDF Report",
+                data=pdf_bytes,
+                file_name=f"hr_validation_{athlete_slug}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with _col_csv:
+            st.download_button(
+                "📊 Download CSV",
+                data=csv_bytes,
+                file_name=f"hr_validation_{athlete_slug}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
         with st.expander("Full Text Report"):
             st.text(format_report(report))
@@ -971,14 +1130,26 @@ elif mode == "Multiple Athletes":
                 st.pyplot(fig)
                 all_figs.append(fig)
 
-        # PDF export
-        pdf_bytes = _make_pdf(all_figs)
-        st.download_button(
-            "⬇ Download Group Report as PDF",
-            data=pdf_bytes,
-            file_name="hr_validation_group.pdf",
-            mime="application/pdf",
-        )
+        # Export
+        pdf_bytes = _make_pdf(all_figs, text_pages=[format_group_report(group)])
+        csv_bytes = _make_group_csv(group)
+        _col_pdf, _col_csv = st.columns(2)
+        with _col_pdf:
+            st.download_button(
+                "📄 Download Group PDF Report",
+                data=pdf_bytes,
+                file_name="hr_validation_group.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with _col_csv:
+            st.download_button(
+                "📊 Download Group CSV",
+                data=csv_bytes,
+                file_name="hr_validation_group.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
         with st.expander("Full Group Report"):
             st.text(format_group_report(group))
@@ -1091,11 +1262,23 @@ else:
         st.pyplot(fig_bi)
         all_figs.append(fig_bi)
 
-        # PDF export
-        pdf_bytes = _make_pdf(all_figs)
-        st.download_button(
-            "⬇ Download Comparison Report as PDF",
-            data=pdf_bytes,
-            file_name="hr_validation_device_comparison.pdf",
-            mime="application/pdf",
-        )
+        # Export
+        pdf_bytes = _make_pdf(all_figs, text_pages=[_format_device_comparison_text(cmp_report)])
+        csv_bytes = _make_comparison_csv(cmp_report)
+        _col_pdf, _col_csv = st.columns(2)
+        with _col_pdf:
+            st.download_button(
+                "📄 Download Comparison PDF",
+                data=pdf_bytes,
+                file_name="hr_validation_device_comparison.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with _col_csv:
+            st.download_button(
+                "📊 Download Comparison CSV",
+                data=csv_bytes,
+                file_name="hr_validation_device_comparison.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )

@@ -6,6 +6,7 @@ from wearable_validation.models import (
     HRDataSeries, TestRunMetadata, AnalysisReport, GroupAnalysisReport,
     Protocol, IntensityBinResult, StepCoverageResult, CoverageReport,
     DeviceComparisonEntry, DeviceComparisonReport,
+    LongitudinalSession, LongitudinalReport,
 )
 from wearable_validation.constants import (
     LOA_Z, MIN_SAMPLES_WARNING, QUALITY_LABELS,
@@ -340,12 +341,9 @@ def analyze_group(
     pooled_loa_lo = pooled_bias - LOA_Z * pooled_sd
     pooled_loa_hi = pooled_bias + LOA_Z * pooled_sd
 
-    mean_mape = float(np.mean(mapes))
-    sd_mape   = float(np.std(mapes,  ddof=1)) if len(mapes)  > 1 else 0.0
-    mean_bias = float(np.mean(biases))
-    sd_bias   = float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0
-    mean_mae  = float(np.mean(maes))
-    sd_mae    = float(np.std(maes,   ddof=1)) if len(maes)   > 1 else 0.0
+    mean_mape, sd_mape = _mean_sd(mapes)
+    mean_bias, sd_bias = _mean_sd(biases)
+    mean_mae,  sd_mae  = _mean_sd(maes)
 
     r_vals  = [rep.pearson_r for rep in reports if rep.pearson_r is not None]
     r2_vals = [rep.r_squared for rep in reports if rep.r_squared is not None]
@@ -379,7 +377,66 @@ def analyze_group(
     )
 
 
+# ── Longitudinal device tracking ─────────────────────────────────────────────
+
+def analyze_longitudinal(
+    sessions: list[tuple[str, HRDataSeries, TestRunMetadata]],
+) -> LongitudinalReport:
+    """
+    Analyse the same device tested across multiple dates.
+
+    sessions: list of (date_str, HRDataSeries, TestRunMetadata).
+    Sorted by date string ascending before processing; caller order does not
+    need to be chronological.
+    """
+    if len(sessions) < 2:
+        raise ValueError("At least two sessions are required for longitudinal analysis.")
+
+    long_sessions: list[LongitudinalSession] = []
+    for date_str, data, meta in sessions:
+        report = analyze_hr_validation(data, meta)
+        long_sessions.append(LongitudinalSession(date=date_str, report=report, data=data))
+
+    long_sessions.sort(key=lambda s: s.date)
+
+    dates         = [s.date               for s in long_sessions]
+    mape_trend    = [s.report.mape        for s in long_sessions]
+    bias_trend    = [s.report.bias        for s in long_sessions]
+    quality_trend = [s.report.quality_label for s in long_sessions]
+
+    mean_mape, sd_mape = _mean_sd(mape_trend)
+    mean_bias, sd_bias = _mean_sd(bias_trend)
+
+    first_meta   = long_sessions[0].report.metadata
+    device_name  = first_meta.wearable_device_name if first_meta else "Wearable"
+    athlete_name = first_meta.athlete_name         if first_meta else "Athlete"
+    wearable_type = first_meta.wearable_type       if first_meta else ""
+    sport        = first_meta.sport                if first_meta else ""
+
+    return LongitudinalReport(
+        device_name=device_name,
+        athlete_name=athlete_name,
+        wearable_type=wearable_type,
+        sport=sport,
+        sessions=long_sessions,
+        dates=dates,
+        mape_trend=mape_trend,
+        bias_trend=bias_trend,
+        quality_trend=quality_trend,
+        mean_mape=mean_mape,
+        sd_mape=sd_mape,
+        mean_bias=mean_bias,
+        sd_bias=sd_bias,
+    )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _mean_sd(values: list[float]) -> tuple[float, float]:
+    """Return (mean, sample SD) for a list of floats. SD is 0.0 for single-element lists."""
+    arr = np.array(values)
+    return float(np.mean(arr)), float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+
 
 def _clean(data: HRDataSeries) -> tuple[np.ndarray, np.ndarray]:
     w = np.asarray(data.hr_wearable, dtype=float)

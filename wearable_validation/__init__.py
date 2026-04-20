@@ -13,6 +13,7 @@ Public API:
   analyze_by_intensity_bin()     — intensity-stratified accuracy
   check_hr_zone_coverage()       — HR zone coverage validation
   analyze_device_comparison()    — multi-device comparison ranked by MAPE
+  analyze_longitudinal()         — same device tracked across multiple test dates
   generate_recommendation()      — use-case onboarding recommendation
   parse_combined_file()          — ingest single combined CSV/JSON
   parse_two_files()              — ingest two separate device files
@@ -20,6 +21,7 @@ Public API:
   trim_session()                 — trim leading warm-up and/or trailing cool-down
   format_report()                — plain-text per-athlete report
   format_group_report()          — plain-text group report
+  format_longitudinal_report()   — plain-text longitudinal tracking report
 """
 from wearable_validation.models import (
     ProtocolParams,
@@ -38,6 +40,8 @@ from wearable_validation.models import (
     OnboardingRecommendation,
     DeviceComparisonEntry,
     DeviceComparisonReport,
+    LongitudinalSession,
+    LongitudinalReport,
 )
 from wearable_validation.protocols import generate_protocol, compute_hrmax
 from wearable_validation.io import parse_combined_file, parse_two_files, align_timeseries, trim_session
@@ -48,9 +52,10 @@ from wearable_validation.analysis import (
     analyze_by_intensity_bin,
     check_hr_zone_coverage,
     analyze_device_comparison,
+    analyze_longitudinal,
 )
 from wearable_validation.recommendation import generate_recommendation
-from wearable_validation.report import format_report, format_group_report
+from wearable_validation.report import format_report, format_group_report, format_longitudinal_report
 
 __all__ = [
     # Models
@@ -70,6 +75,8 @@ __all__ = [
     "OnboardingRecommendation",
     "DeviceComparisonEntry",
     "DeviceComparisonReport",
+    "LongitudinalSession",
+    "LongitudinalReport",
     # Core functions
     "generate_protocol",
     "compute_hrmax",
@@ -84,7 +91,9 @@ __all__ = [
     "analyze_by_intensity_bin",
     "check_hr_zone_coverage",
     "analyze_device_comparison",
+    "analyze_longitudinal",
     "generate_recommendation",
     "format_report",
     "format_group_report",
+    "format_longitudinal_report",
 ]

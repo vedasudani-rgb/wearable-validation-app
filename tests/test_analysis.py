@@ -3,7 +3,10 @@ import warnings
 import numpy as np
 
 from wearable_validation.models import HRDataSeries, TestRunMetadata
-from wearable_validation.analysis import analyze_hr_validation, analyze_group, _quality_label, _bootstrap_mape_ci
+from wearable_validation.analysis import (
+    analyze_hr_validation, analyze_group, analyze_longitudinal,
+    _quality_label, _bootstrap_mape_ci,
+)
 from wearable_validation.protocols import generate_protocol, compute_hrmax
 from wearable_validation.models import ProtocolParams
 
@@ -336,6 +339,92 @@ class TestAdvancedStatistics(unittest.TestCase):
         self.assertIsNotNone(g.mean_r_squared)
         self.assertGreater(g.mean_pearson_r, 0.0)
         self.assertLessEqual(g.mean_pearson_r, 1.0)
+
+
+class TestLongitudinalAnalysis(unittest.TestCase):
+    """Tests for analyze_longitudinal()."""
+
+    def _make_session(self, date: str, noise: float) -> tuple:
+        rng = np.random.default_rng(hash(date) % (2**32))
+        ref  = rng.uniform(130, 175, size=200)
+        wear = ref + rng.normal(0, noise, 200)
+        data = _make_data(wear, ref)
+        meta = TestRunMetadata(
+            test_date=date,
+            athlete_name="Test Athlete",
+            wearable_device_name="TestDevice",
+            reference_device_name="Polar H10",
+            sport="running",
+            metric="heart_rate",
+            wearable_type="wrist_based_ppg",
+            reference_type="chest_strap_ecg",
+        )
+        return date, data, meta
+
+    def test_returns_correct_session_count(self):
+        sessions = [self._make_session(d, 4.0) for d in ("2024-01-01", "2024-03-01", "2024-06-01")]
+        report = analyze_longitudinal(sessions)
+        self.assertEqual(len(report.sessions), 3)
+        self.assertEqual(len(report.dates), 3)
+        self.assertEqual(len(report.mape_trend), 3)
+
+    def test_sessions_sorted_by_date(self):
+        # Provide sessions out of order — should come back sorted
+        sessions = [
+            self._make_session("2024-06-01", 4.0),
+            self._make_session("2024-01-01", 4.0),
+            self._make_session("2024-03-15", 4.0),
+        ]
+        report = analyze_longitudinal(sessions)
+        self.assertEqual(report.dates, sorted(report.dates))
+
+    def test_mape_trend_matches_per_session_reports(self):
+        sessions = [self._make_session(d, 4.0) for d in ("2024-01-01", "2024-04-01")]
+        report = analyze_longitudinal(sessions)
+        for session, mape in zip(report.sessions, report.mape_trend):
+            self.assertAlmostEqual(session.report.mape, mape, places=8)
+
+    def test_mean_mape_within_trend_range(self):
+        sessions = [
+            self._make_session("2024-01-01", 2.0),   # low noise → low MAPE
+            self._make_session("2024-06-01", 12.0),  # high noise → high MAPE
+        ]
+        report = analyze_longitudinal(sessions)
+        self.assertGreaterEqual(report.mean_mape, min(report.mape_trend))
+        self.assertLessEqual(report.mean_mape, max(report.mape_trend))
+
+    def test_quality_trend_length_matches_sessions(self):
+        sessions = [self._make_session(d, 4.0) for d in ("2024-01-01", "2024-04-01", "2024-08-01")]
+        report = analyze_longitudinal(sessions)
+        self.assertEqual(len(report.quality_trend), len(report.sessions))
+
+    def test_raises_with_fewer_than_two_sessions(self):
+        with self.assertRaises(ValueError):
+            analyze_longitudinal([self._make_session("2024-01-01", 4.0)])
+
+    def test_device_name_from_metadata(self):
+        sessions = [self._make_session(d, 4.0) for d in ("2024-01-01", "2024-04-01")]
+        report = analyze_longitudinal(sessions)
+        self.assertEqual(report.device_name, "TestDevice")
+
+    def test_sd_mape_is_zero_for_identical_sessions(self):
+        # Two sessions with the same data → sd_mape should be 0
+        rng = np.random.default_rng(0)
+        ref  = rng.uniform(130, 175, size=200)
+        wear = ref + rng.normal(0, 4.0, 200)
+        data = _make_data(wear, ref)
+        meta = TestRunMetadata(
+            test_date="2024-01-01", athlete_name="A", wearable_device_name="D",
+            reference_device_name="R", sport="running", metric="heart_rate",
+            wearable_type="wrist_based_ppg", reference_type="chest_strap_ecg",
+        )
+        meta2 = TestRunMetadata(
+            test_date="2024-04-01", athlete_name="A", wearable_device_name="D",
+            reference_device_name="R", sport="running", metric="heart_rate",
+            wearable_type="wrist_based_ppg", reference_type="chest_strap_ecg",
+        )
+        report = analyze_longitudinal([("2024-01-01", data, meta), ("2024-04-01", data, meta2)])
+        self.assertAlmostEqual(report.sd_mape, 0.0, places=8)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Run with: streamlit run app.py --browser.gatherUsageStats false
 """
 import io
 import warnings
+from collections import Counter
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -25,9 +26,11 @@ from wearable_validation import (
     analyze_by_intensity_bin,
     check_hr_zone_coverage,
     analyze_device_comparison,
+    analyze_longitudinal,
     generate_recommendation,
     format_report,
     format_group_report,
+    format_longitudinal_report,
 )
 from wearable_validation.plots import (
     plot_timeseries,
@@ -36,6 +39,7 @@ from wearable_validation.plots import (
     plot_group_bland_altman,
     plot_intensity_bins,
     plot_data_preview,
+    plot_longitudinal_trend,
 )
 from wearable_validation.constants import (
     QUALITY_COLOURS, QUALITY_LABELS, HRMAX_SE_BPM, SPORT_CONTEXTS, USE_CASES,
@@ -251,6 +255,19 @@ def _make_pdf(figures: list, text_pages: list[str] | None = None) -> bytes:
     return buf.read()
 
 
+def _adv_stat_fields(r) -> dict:
+    """Return the 7 optional advanced-stat CSV columns for an AnalysisReport."""
+    return {
+        "pearson_r":          r.pearson_r     if r.pearson_r     is not None else "",
+        "r_squared":          r.r_squared     if r.r_squared     is not None else "",
+        "see_bpm":            r.see           if r.see           is not None else "",
+        "bias_ci_lower_bpm":  r.bias_ci_lower if r.bias_ci_lower is not None else "",
+        "bias_ci_upper_bpm":  r.bias_ci_upper if r.bias_ci_upper is not None else "",
+        "mape_ci_lower_pct":  r.mape_ci_lower if r.mape_ci_lower is not None else "",
+        "mape_ci_upper_pct":  r.mape_ci_upper if r.mape_ci_upper is not None else "",
+    }
+
+
 def _make_single_csv(report) -> bytes:
     r = report
     m = r.metadata
@@ -266,13 +283,7 @@ def _make_single_csv(report) -> bytes:
         "n_samples":          r.n_samples,
         "n_outliers_flagged": r.n_outliers_flagged,
         "quality_label":      r.quality_label,
-        "pearson_r":          r.pearson_r        if r.pearson_r        is not None else "",
-        "r_squared":          r.r_squared        if r.r_squared        is not None else "",
-        "see_bpm":            r.see              if r.see              is not None else "",
-        "bias_ci_lower_bpm":  r.bias_ci_lower    if r.bias_ci_lower    is not None else "",
-        "bias_ci_upper_bpm":  r.bias_ci_upper    if r.bias_ci_upper    is not None else "",
-        "mape_ci_lower_pct":  r.mape_ci_lower    if r.mape_ci_lower    is not None else "",
-        "mape_ci_upper_pct":  r.mape_ci_upper    if r.mape_ci_upper    is not None else "",
+        **_adv_stat_fields(r),
     }
     return pd.DataFrame([row]).to_csv(index=False).encode("utf-8")
 
@@ -293,13 +304,7 @@ def _make_group_csv(group) -> bytes:
             "n_samples":          r.n_samples,
             "n_outliers_flagged": r.n_outliers_flagged,
             "quality_label":      r.quality_label,
-            "pearson_r":          r.pearson_r     if r.pearson_r     is not None else "",
-            "r_squared":          r.r_squared     if r.r_squared     is not None else "",
-            "see_bpm":            r.see           if r.see           is not None else "",
-            "bias_ci_lower_bpm":  r.bias_ci_lower if r.bias_ci_lower is not None else "",
-            "bias_ci_upper_bpm":  r.bias_ci_upper if r.bias_ci_upper is not None else "",
-            "mape_ci_lower_pct":  r.mape_ci_lower if r.mape_ci_lower is not None else "",
-            "mape_ci_upper_pct":  r.mape_ci_upper if r.mape_ci_upper is not None else "",
+            **_adv_stat_fields(r),
         })
     rows.append({
         "athlete_name":       "GROUP_SUMMARY",
@@ -340,15 +345,55 @@ def _make_comparison_csv(cmp_report) -> bytes:
             "n_samples":          r.n_samples,
             "n_outliers_flagged": r.n_outliers_flagged,
             "quality_label":      r.quality_label,
-            "pearson_r":          r.pearson_r     if r.pearson_r     is not None else "",
-            "r_squared":          r.r_squared     if r.r_squared     is not None else "",
-            "see_bpm":            r.see           if r.see           is not None else "",
-            "bias_ci_lower_bpm":  r.bias_ci_lower if r.bias_ci_lower is not None else "",
-            "bias_ci_upper_bpm":  r.bias_ci_upper if r.bias_ci_upper is not None else "",
-            "mape_ci_lower_pct":  r.mape_ci_lower if r.mape_ci_lower is not None else "",
-            "mape_ci_upper_pct":  r.mape_ci_upper if r.mape_ci_upper is not None else "",
+            **_adv_stat_fields(r),
         })
     return pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+
+
+def _make_longitudinal_csv(long_report) -> bytes:
+    rows = []
+    for s in long_report.sessions:
+        r = s.report
+        rows.append({
+            "date":               s.date,
+            "device_name":        long_report.device_name,
+            "athlete_name":       long_report.athlete_name,
+            "bias_bpm":           r.bias,
+            "mae_bpm":            r.mae,
+            "mape_pct":           r.mape,
+            "loa_lower_bpm":      r.loa_lower,
+            "loa_upper_bpm":      r.loa_upper,
+            "n_samples":          r.n_samples,
+            "n_outliers_flagged": r.n_outliers_flagged,
+            "quality_label":      r.quality_label,
+            **_adv_stat_fields(r),
+        })
+    rows.append({
+        "date":               "LONGITUDINAL_SUMMARY",
+        "device_name":        long_report.device_name,
+        "athlete_name":       long_report.athlete_name,
+        "bias_bpm":           long_report.mean_bias,
+        "mae_bpm":            "",
+        "mape_pct":           long_report.mean_mape,
+        "loa_lower_bpm":      "",
+        "loa_upper_bpm":      "",
+        "n_samples": "", "n_outliers_flagged": "", "quality_label": "",
+        "pearson_r": "", "r_squared": "", "see_bpm": "",
+        "bias_ci_lower_bpm": "", "bias_ci_upper_bpm": "",
+        "mape_ci_lower_pct": "", "mape_ci_upper_pct": "",
+    })
+    return pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+
+
+def _quality_badge_html(quality_key: str, label: str | None = None) -> str:
+    """Return a small coloured <span> badge for a quality label key."""
+    colour = QUALITY_COLOURS.get(quality_key, "#555")
+    text = label if label is not None else quality_key.capitalize()
+    return (
+        f"<span style='background:{colour};padding:2px 10px;"
+        f"border-radius:4px;color:white;font-size:0.85em;font-weight:600;'>"
+        f"{text}</span>"
+    )
 
 
 def _format_device_comparison_text(cmp_report) -> str:
@@ -639,7 +684,7 @@ st.header("2. Upload Session Data")
 
 mode = st.radio(
     "Session mode",
-    options=["Single Athlete", "Multiple Athletes", "Compare Devices"],
+    options=["Single Athlete", "Multiple Athletes", "Compare Devices", "Track Over Time"],
     horizontal=True,
 )
 
@@ -753,8 +798,7 @@ elif mode == "Multiple Athletes":
         "Conditions (applies to all athletes)", placeholder="e.g. outdoor flat, 18°C"
     )
 
-else:
-    # Compare Devices
+elif mode == "Compare Devices":
     st.markdown(
         "Upload one reference file and multiple wearable device files. "
         "Each device will be ranked by MAPE against the same reference."
@@ -800,6 +844,66 @@ else:
             st.session_state["device_rows"][i]["file"] = st.file_uploader(
                 f"Wearable file {i + 1}", type=["csv", "json"], key=f"dfile_{i}"
             )
+
+
+else:
+    # Track Over Time
+    st.markdown(
+        "Upload wearable and reference files for the **same device** tested on multiple dates. "
+        "The tool plots accuracy trends to show whether device performance is improving, "
+        "stable, or degrading over time."
+    )
+    long_device_name = st.text_input("Device Name", value="Wearable Device", key="long_device_name")
+    long_athlete_name = st.text_input("Athlete / Subject Name", value="Athlete 1", key="long_athlete_name")
+    long_wearable_type = st.selectbox(
+        "Wearable Type",
+        options=["wrist_based_ppg", "finger_based_ppg"],
+        format_func=lambda x: {"wrist_based_ppg": "Wrist PPG", "finger_based_ppg": "Finger PPG"}[x],
+        key="long_wearable_type",
+    )
+
+    if "long_rows" not in st.session_state:
+        st.session_state["long_rows"] = [
+            {"date": "", "w_file": None, "r_file": None},
+            {"date": "", "w_file": None, "r_file": None},
+        ]
+
+    if st.button("+ Add Session"):
+        st.session_state["long_rows"].append({"date": "", "w_file": None, "r_file": None})
+
+    st.caption(
+        "Each session needs: a test date (YYYY-MM-DD), a wearable file, and a reference file. "
+        "Files must contain `timestamp` and HR columns."
+    )
+    for i, lrow in enumerate(st.session_state["long_rows"]):
+        c1, c2, c3 = st.columns([2, 3, 3])
+        with c1:
+            st.session_state["long_rows"][i]["date"] = st.text_input(
+                f"Date {i + 1} (YYYY-MM-DD)", value=lrow["date"], key=f"ldate_{i}"
+            )
+        with c2:
+            st.session_state["long_rows"][i]["w_file"] = st.file_uploader(
+                f"Wearable file {i + 1}", type=["csv", "json"], key=f"lw_{i}"
+            )
+        with c3:
+            st.session_state["long_rows"][i]["r_file"] = st.file_uploader(
+                f"Reference file {i + 1}", type=["csv", "json"], key=f"lr_{i}"
+            )
+
+    with st.expander("Session Trim — optional (applies to all sessions)", expanded=False):
+        st.caption(
+            "Trim the same amount from every session to keep the longitudinal comparison consistent. "
+            "Varying trim per session would confound accuracy trends."
+        )
+        _ltc1, _ltc2 = st.columns(2)
+        _ltc1.number_input(
+            "Warm-up to remove (seconds)", min_value=0, step=5,
+            value=0, key="long_warmup_input",
+        )
+        _ltc2.number_input(
+            "Cool-down to remove (seconds)", min_value=0, step=5,
+            value=0, key="long_cooldown_input",
+        )
 
 
 # ── SECTION 3: Analyse & Results ─────────────────────────────────────────────
@@ -1017,6 +1121,15 @@ elif mode == "Multiple Athletes":
             value=0.0, step=0.5, key="multi_cooldown_minutes",
         )
 
+    # Clear stale group results when the file set changes
+    _current_multi_sig = tuple(
+        (r["name"], r["w_file"].name if r["w_file"] else None, r["r_file"].name if r["r_file"] else None)
+        for r in st.session_state.get("athlete_rows", [])
+    )
+    if st.session_state.get("_multi_sig") != _current_multi_sig:
+        for _k in ["group_report", "group_data", "group_artifact_counts"]:
+            st.session_state.pop(_k, None)
+
     if st.button("Analyse All", type="primary"):
         rows = st.session_state.get("athlete_rows", [])
         valid_rows = [r for r in rows if r["w_file"] and r["r_file"]]
@@ -1058,6 +1171,7 @@ elif mode == "Multiple Athletes":
                 st.session_state["group_artifact_counts"] = [
                     detect_artifacts(d).n_flagged_combined for d in all_data
                 ]
+                st.session_state["_multi_sig"] = _current_multi_sig
 
     if "group_report" in st.session_state:
         group    = st.session_state["group_report"]
@@ -1094,6 +1208,22 @@ elif mode == "Multiple Athletes":
                 row["Artifacts"] = artifact_counts[i]
             table_rows.append(row)
         st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+        with st.expander("Column definitions", expanded=False):
+            st.markdown(
+                "- **MAPE (%)** — Mean Absolute Percentage Error: error as % of true HR. "
+                "< 3% Excellent · < 5% Good · < 10% Acceptable. Navalta et al. (2020), INTERLIVE (2020).  \n"
+                "- **Bias (BPM)** — Average systematic offset (wearable − reference). "
+                "Positive = reads too high. Bland & Altman (1986).  \n"
+                "- **MAE (BPM)** — Mean Absolute Error: average magnitude of errors ignoring direction.  \n"
+                "- **LoA Lower / Upper** — 95% Limits of Agreement: the range within which 95% of "
+                "individual errors fall. Wider span = less consistent. Bland & Altman (1986).  \n"
+                "- **Pearson r** — Linear correlation coefficient. Secondary to LoA for validity assessment. "
+                "Atkinson & Nevill (1998).  \n"
+                "- **R²** — Coefficient of determination. Proportion of variance explained.  \n"
+                "- **SEE (BPM)** — Standard Error of the Estimate. Hopkins (2000).  \n"
+                "- **Artifacts** — Number of samples flagged as out-of-range, spikes, or flatlines "
+                "and excluded before analysis."
+            )
 
         # Group metrics
         g1, g2, g3, g4 = st.columns(4)
@@ -1113,7 +1243,10 @@ elif mode == "Multiple Athletes":
                 st.info("No advanced statistics available.")
 
         # Group plots
-        tab1, tab2, tab3 = st.tabs(["Per-Athlete Bland-Altman", "Pooled Bland-Altman", "Individual Scatter"])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Per-Athlete Bland-Altman", "Pooled Bland-Altman",
+            "Individual Scatter", "Intensity Zones",
+        ])
         all_figs = []
         with tab1:
             for r, d in zip(group.athlete_reports, all_data):
@@ -1129,6 +1262,14 @@ elif mode == "Multiple Athletes":
                 fig = plot_scatter(d, r.metadata)
                 st.pyplot(fig)
                 all_figs.append(fig)
+        with tab4:
+            for r, d in zip(group.athlete_reports, all_data):
+                name = r.metadata.athlete_name if r.metadata else "Athlete"
+                st.caption(f"**{name}**")
+                bins_a = analyze_by_intensity_bin(d)
+                fig_bi = plot_intensity_bins(bins_a)
+                st.pyplot(fig_bi)
+                all_figs.append(fig_bi)
 
         # Export
         pdf_bytes = _make_pdf(all_figs, text_pages=[format_group_report(group)])
@@ -1154,8 +1295,7 @@ elif mode == "Multiple Athletes":
         with st.expander("Full Group Report"):
             st.text(format_group_report(group))
 
-else:
-    # Compare Devices
+elif mode == "Compare Devices":
     with st.expander("Session trim (optional)"):
         st.caption(
             "Trim leading warm-up and/or trailing cool-down from analysis. "
@@ -1170,6 +1310,17 @@ else:
             "Exclude cool-down (minutes)", min_value=0.0, max_value=30.0,
             value=0.0, step=0.5, key="comp_cooldown_minutes",
         )
+
+    # Clear stale comparison results when the file set changes
+    _current_cmp_sig = (
+        ref_file_cmp.name if ref_file_cmp else None,
+        tuple(
+            (d["name"], d["file"].name if d["file"] else None)
+            for d in st.session_state.get("device_rows", [])
+        ),
+    )
+    if st.session_state.get("_cmp_sig") != _current_cmp_sig:
+        st.session_state.pop("cmp_report", None)
 
     if st.button("Analyse Devices", type="primary"):
         device_rows = st.session_state.get("device_rows", [])
@@ -1202,6 +1353,7 @@ else:
                     metadata_base=meta_base,
                 )
                 st.session_state["cmp_report"] = cmp_report
+                st.session_state["_cmp_sig"] = _current_cmp_sig
 
             except Exception as e:
                 st.error(f"Comparison failed: {e}")
@@ -1224,21 +1376,49 @@ else:
         st.subheader("Device Ranking (Best → Worst MAPE)")
         rank_rows = []
         for entry in cmp_report.entries:
+            r = entry.report
             rank_rows.append({
-                "Rank":        entry.rank,
-                "Device":      entry.device_name,
-                "Type":        entry.wearable_type.replace("_", " ").title(),
-                "MAPE (%)":    round(entry.report.mape, 2),
-                "Bias (BPM)":  round(entry.report.bias, 2),
-                "MAE (BPM)":   round(entry.report.mae, 2),
-                "LoA Lower":   round(entry.report.loa_lower, 2),
-                "LoA Upper":   round(entry.report.loa_upper, 2),
-                "Quality":     QUALITY_LABELS[entry.report.quality_label],
-                "Pearson r":   round(entry.report.pearson_r, 4) if entry.report.pearson_r is not None else "\u2014",
-                "R\u00b2":        round(entry.report.r_squared, 4) if entry.report.r_squared is not None else "\u2014",
-                "SEE (BPM)":   round(entry.report.see, 3)       if entry.report.see       is not None else "\u2014",
+                "Rank":           entry.rank,
+                "Device":         entry.device_name,
+                "Type":           entry.wearable_type.replace("_", " ").title(),
+                "MAPE (%)":       round(r.mape, 2),
+                "Bias (BPM)":     round(r.bias, 2),
+                "MAE (BPM)":      round(r.mae, 2),
+                "LoA Lower":      round(r.loa_lower, 2),
+                "LoA Upper":      round(r.loa_upper, 2),
+                "Quality":        QUALITY_LABELS[r.quality_label],
+                "Pearson r":      round(r.pearson_r, 4) if r.pearson_r is not None else "\u2014",
+                "R\u00b2":            round(r.r_squared, 4) if r.r_squared is not None else "\u2014",
+                "SEE (BPM)":      round(r.see, 3) if r.see is not None else "\u2014",
+                "Bias 95% CI":    (
+                    f"{r.bias_ci_lower:+.2f} to {r.bias_ci_upper:+.2f} BPM"
+                    if r.bias_ci_lower is not None else "\u2014"
+                ),
+                "MAPE 95% CI":    (
+                    f"{r.mape_ci_lower:.2f}% to {r.mape_ci_upper:.2f}%"
+                    if r.mape_ci_lower is not None else "\u2014"
+                ),
+                "Artifacts":      r.n_outliers_flagged,
             })
         st.dataframe(pd.DataFrame(rank_rows), use_container_width=True, hide_index=True)
+        with st.expander("Column definitions", expanded=False):
+            st.markdown(
+                "- **MAPE (%)** — Mean Absolute Percentage Error: error as % of true HR. "
+                "< 3% Excellent · < 5% Good · < 10% Acceptable. Navalta et al. (2020), INTERLIVE (2020).  \n"
+                "- **Bias (BPM)** — Average systematic offset (wearable − reference). "
+                "Positive = reads too high. Bland & Altman (1986).  \n"
+                "- **MAE (BPM)** — Mean Absolute Error: average magnitude of errors ignoring direction.  \n"
+                "- **LoA Lower / Upper** — 95% Limits of Agreement span within which 95% of individual "
+                "errors fall. Bland & Altman (1986).  \n"
+                "- **Pearson r / R²** — Correlation statistics. Secondary to LoA. "
+                "Atkinson & Nevill (1998).  \n"
+                "- **SEE (BPM)** — Standard Error of the Estimate. Hopkins (2000).  \n"
+                "- **Bias 95% CI** — Parametric 95% confidence interval for the mean bias. "
+                "Bland & Altman (1999).  \n"
+                "- **MAPE 95% CI** — Percentile bootstrap 95% CI for MAPE (1000 resamples). "
+                "Efron & Tibshirani (1993).  \n"
+                "- **Artifacts** — Samples flagged as out-of-range, spikes, or flatlines and excluded."
+            )
 
         # Onboarding recommendation for best device
         if selected_use_cases:
@@ -1247,20 +1427,19 @@ else:
             if rec:
                 _render_recommendation(rec)
 
-        # Per-device plots
-        st.subheader("Per-Device Bland-Altman Plots")
+        # Per-device plots — one tab per device
+        st.subheader("Per-Device Analysis")
         all_figs = []
-        for entry in cmp_report.entries:
-            fig = plot_bland_altman(entry.report, entry.data)
-            st.pyplot(fig)
-            all_figs.append(fig)
-
-        # Intensity bins for best device
-        st.subheader(f"Accuracy by Intensity Zone — {best.device_name}")
-        bins_best = analyze_by_intensity_bin(best.data)
-        fig_bi = plot_intensity_bins(bins_best)
-        st.pyplot(fig_bi)
-        all_figs.append(fig_bi)
+        device_tabs = st.tabs([e.device_name for e in cmp_report.entries])
+        for tab, entry in zip(device_tabs, cmp_report.entries):
+            with tab:
+                fig_ba = plot_bland_altman(entry.report, entry.data)
+                st.pyplot(fig_ba)
+                all_figs.append(fig_ba)
+                bins_entry = analyze_by_intensity_bin(entry.data)
+                fig_bi = plot_intensity_bins(bins_entry)
+                st.pyplot(fig_bi)
+                all_figs.append(fig_bi)
 
         # Export
         pdf_bytes = _make_pdf(all_figs, text_pages=[_format_device_comparison_text(cmp_report)])
@@ -1282,3 +1461,181 @@ else:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+else:
+    # Track Over Time
+    # Clear stale results when file set changes
+    _current_long_sig = tuple(
+        (r["date"], r["w_file"].name if r["w_file"] else None, r["r_file"].name if r["r_file"] else None)
+        for r in st.session_state.get("long_rows", [])
+    )
+    if st.session_state.get("_long_sig") != _current_long_sig:
+        st.session_state.pop("long_report", None)
+
+    long_rows = st.session_state.get("long_rows", [])
+    valid_long_rows = [r for r in long_rows if r["date"] and r["w_file"] and r["r_file"]]
+    can_analyse = len(valid_long_rows) >= 2
+
+    if not can_analyse and long_rows:
+        st.info("Complete at least 2 sessions (date + wearable file + reference file) to enable analysis.")
+
+    if st.button("Analyse Sessions", type="primary", disabled=not can_analyse):
+        sessions_input = []
+        errors = []
+        _l_warmup = st.session_state.get("long_warmup_input", 0)
+        _l_cooldown = st.session_state.get("long_cooldown_input", 0)
+        for lrow in valid_long_rows:
+            try:
+                lrow["w_file"].seek(0)
+                lrow["r_file"].seek(0)
+                d = parse_two_files(lrow["w_file"], lrow["r_file"])
+                if _l_warmup or _l_cooldown:
+                    d = trim_session(d, _l_warmup, _l_cooldown)
+                meta = _build_metadata(
+                    st.session_state.get("long_athlete_name", "Athlete"),
+                    "",
+                    sport_key,
+                    st.session_state.get("long_wearable_type", "wrist_based_ppg"),
+                    reference_type,
+                    st.session_state.get("long_device_name", "Wearable Device"),
+                    reference_name or "Reference",
+                    lrow["date"],
+                )
+                sessions_input.append((lrow["date"], d, meta))
+            except Exception as e:
+                errors.append(f"{lrow['date']}: {e}")
+
+        for err in errors:
+            st.error(err)
+
+        if len(sessions_input) >= 2:
+            try:
+                long_report = analyze_longitudinal(sessions_input)
+                st.session_state["long_report"] = long_report
+                st.session_state["_long_sig"] = _current_long_sig
+            except Exception as e:
+                st.error(f"Longitudinal analysis failed: {e}")
+
+    if "long_report" in st.session_state:
+        long_report = st.session_state["long_report"]
+
+        # Overall quality — use the most common quality label as the banner colour
+        overall_q = Counter(long_report.quality_trend).most_common(1)[0][0]
+        q_colour = QUALITY_COLOURS.get(overall_q, "#555")
+        date_range = f"{long_report.dates[0]} → {long_report.dates[-1]}"
+        st.markdown(
+            f"<div style='background:{q_colour};padding:12px 18px;"
+            f"border-radius:8px;color:white;margin-bottom:4px;'>"
+            f"<b>{long_report.device_name}</b>  ·  {long_report.athlete_name}  ·  "
+            f"{len(long_report.sessions)} sessions  ·  {date_range}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Metric row — 3 columns + full-width quality trend below
+        lm1, lm2, lm3 = st.columns(3)
+        lm1.metric(
+            "Sessions",
+            len(long_report.sessions),
+            help="Number of test sessions included in the longitudinal analysis.",
+        )
+        lm2.metric(
+            "Mean MAPE",
+            f"{long_report.mean_mape:.1f}% ± {long_report.sd_mape:.1f}%",
+            help=(
+                "Mean Absolute Percentage Error averaged across all sessions. "
+                "SD reflects how much accuracy varied between test dates. "
+                "Navalta et al. (2020), INTERLIVE (2020)."
+            ),
+        )
+        lm3.metric(
+            "Mean Bias",
+            f"{long_report.mean_bias:+.1f} ± {long_report.sd_bias:.1f} BPM",
+            help=(
+                "Average systematic offset (wearable − reference) across sessions. "
+                "Positive = device consistently reads too high. Bland & Altman (1986)."
+            ),
+        )
+        # Quality trend as full-width coloured badge row
+        _badge_html = " &nbsp;→&nbsp; ".join(
+            _quality_badge_html(q) for q in long_report.quality_trend
+        )
+        st.markdown(
+            f"<div style='margin-top:6px;'><span style='font-size:0.85em;color:#666;'>"
+            f"Quality Trend</span><br/>{_badge_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Main trend plot — full width
+        st.markdown("---")
+        fig_trend = plot_longitudinal_trend(long_report)
+        st.pyplot(fig_trend)
+
+        # Per-session expandable details (collapsed by default)
+        st.markdown("---")
+        st.subheader("Per-Session Details")
+        session_figs = [fig_trend]
+        for session in long_report.sessions:
+            q_label = QUALITY_LABELS[session.report.quality_label]
+            q_c = QUALITY_COLOURS.get(session.report.quality_label, "#555")
+            with st.expander(
+                f"{session.date}  ·  MAPE {session.report.mape:.1f}%  ·  {q_label}",
+                expanded=False,
+            ):
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                sc1.metric(
+                    "MAPE",
+                    f"{session.report.mape:.2f}%",
+                    help="Mean Absolute Percentage Error for this session.",
+                )
+                sc2.metric(
+                    "Bias",
+                    f"{session.report.bias:+.2f} BPM",
+                    help="Mean systematic offset for this session.",
+                )
+                sc3.metric(
+                    "MAE",
+                    f"{session.report.mae:.2f} BPM",
+                    help="Mean Absolute Error for this session.",
+                )
+                sc4.metric(
+                    "N Samples",
+                    session.report.n_samples,
+                    help="Paired samples used in analysis after artifact exclusion.",
+                )
+                st.markdown(
+                    _quality_badge_html(session.report.quality_label, q_label),
+                    unsafe_allow_html=True,
+                )
+                fig_ba = plot_bland_altman(session.report, session.data)
+                # Append session date to Bland-Altman title for PDF clarity
+                fig_ba.axes[0].set_title(
+                    fig_ba.axes[0].get_title() + f"  ·  {session.date}"
+                )
+                st.pyplot(fig_ba)
+                session_figs.append(fig_ba)
+
+        # Export
+        st.markdown("---")
+        pdf_bytes = _make_pdf(session_figs, text_pages=[format_longitudinal_report(long_report)])
+        csv_bytes = _make_longitudinal_csv(long_report)
+        _lc_pdf, _lc_csv = st.columns(2)
+        with _lc_pdf:
+            st.download_button(
+                "📄 Download Longitudinal PDF Report",
+                data=pdf_bytes,
+                file_name=f"hr_longitudinal_{long_report.device_name.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with _lc_csv:
+            st.download_button(
+                "📊 Download Longitudinal CSV",
+                data=csv_bytes,
+                file_name=f"hr_longitudinal_{long_report.device_name.replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        with st.expander("Full Longitudinal Report"):
+            st.text(format_longitudinal_report(long_report))

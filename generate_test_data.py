@@ -313,6 +313,32 @@ for name, bias, noise, lag, spike, int_scale in device_configs:
     _save(d / f"{name}.csv", ts, w, col_name="hr_wearable")
     print(f"    {name}: MAPE = {_mape(w, ref):.1f}%")
 
+# ────────────────────────────────────────────────────────────────────────────
+# 7. LONGITUDINAL — Same device across 6 test dates (drift + firmware recovery)
+#    Narrative: Good baseline → sensor drift → firmware fix → Excellent
+# ────────────────────────────────────────────────────────────────────────────
+print("\n── Longitudinal / Running Steady (6 sessions) ──")
+d = base / "longitudinal"
+
+# (date, bias, noise_std, lag, spike_prob, intensity_scale)  → target MAPE
+longitudinal_sessions = [
+    ("2024-01-15", 2.0,  5.0, 3, 0.003, 1.2),  # Good baseline ~4%
+    ("2024-02-19", 1.8,  4.5, 2, 0.003, 1.1),  # Good — still clean ~3.5%
+    ("2024-04-03", 3.5,  9.5, 4, 0.010, 1.6),  # Acceptable — drift begins ~6.5%
+    ("2024-05-14", 4.0, 12.0, 5, 0.014, 1.9),  # Acceptable — degraded ~7.5%
+    ("2024-06-20", 2.5,  6.5, 3, 0.005, 1.3),  # Good — firmware fix applied ~5%
+    ("2024-08-08", 1.5,  3.5, 2, 0.003, 1.1),  # Excellent — further improved ~2.5%
+]
+for date_str, bias, noise, lag, spike, int_scale in longitudinal_sessions:
+    segs = running_steady_segments()
+    ref  = _make_reference(segs)
+    ts   = _timestamps(len(ref))
+    w    = _add_ppg_noise(ref, bias, noise, lag, spike, int_scale)
+    session_dir = d / date_str
+    _save(session_dir / "reference.csv", ts, ref, col_name="hr_reference")
+    _save(session_dir / "wearable.csv",  ts, w,   col_name="hr_wearable")
+    print(f"    {date_str}: MAPE = {_mape(w, ref):.1f}%")
+
 print(f"\nDone. All files written to: {base.resolve()}/")
 print("\nQuick reference — expected MAPE values:")
 print("  running_steady/wearable_wrist_excellent  → ~2–3%   Excellent")
@@ -326,3 +352,4 @@ print("  cycling_steady/wearable_finger           → ~8–10%  Acceptable/Poor 
 print("  cycling_interval/wearable_wrist          → ~5–7%")
 print("  multi_athlete: athlete1 ~2.5%, athlete2 ~6%, athlete3 ~12%")
 print("  device_comparison: Garmin ~2.5% > Apple ~5% > Polar finger ~8%")
+print("  longitudinal: Jan ~4%, Feb ~3.5%, Apr ~6.5%, May ~7.5%, Jun ~5%, Aug ~2.5%")

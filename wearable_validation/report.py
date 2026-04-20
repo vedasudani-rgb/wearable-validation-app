@@ -1,5 +1,7 @@
 from __future__ import annotations
-from wearable_validation.models import TestRunMetadata, AnalysisReport, GroupAnalysisReport
+from wearable_validation.models import (
+    TestRunMetadata, AnalysisReport, GroupAnalysisReport, LongitudinalReport,
+)
 from wearable_validation.constants import QUALITY_LABELS
 
 
@@ -107,6 +109,46 @@ def format_group_report(group_report: GroupAnalysisReport) -> str:
         f"  - Between-athlete variability in MAPE (SD={group_report.sd_mape:.1f}%) may reflect\n"
         f"    differences in skin tone, wrist circumference, or movement patterns.\n"
         f"  - These thresholds are heuristic. LoA are the primary validity indicator.\n"
+        f"{'='*62}\n"
+    )
+
+
+def format_longitudinal_report(report: LongitudinalReport) -> str:
+    """Render a plain-text longitudinal device tracking report."""
+    W = 26
+
+    per_session = ""
+    for s in report.sessions:
+        per_session += (
+            f"  {s.date:<12} MAPE={s.report.mape:.1f}%  Bias={s.report.bias:+.1f} BPM  "
+            f"MAE={s.report.mae:.1f} BPM  LoA=[{s.report.loa_lower:.1f}, {s.report.loa_upper:.1f}]  "
+            f"{QUALITY_LABELS[s.report.quality_label]}\n"
+        )
+
+    quality_arrow = " \u2192 ".join(report.quality_trend)
+
+    return (
+        f"{'='*62}\n"
+        f"  LONGITUDINAL HR VALIDATION REPORT\n"
+        f"{'='*62}\n"
+        f"  {'Device':<{W}}: {report.device_name}\n"
+        f"  {'Athlete':<{W}}: {report.athlete_name}\n"
+        f"  {'Wearable type':<{W}}: {report.wearable_type}\n"
+        f"  {'Sport':<{W}}: {report.sport}\n"
+        f"  {'Sessions analysed':<{W}}: {len(report.sessions)}\n"
+        f"\n--- PER-SESSION RESULTS ---\n{per_session}"
+        f"\n--- LONGITUDINAL SUMMARY ---\n"
+        f"  {'Mean MAPE':<{W}}: {report.mean_mape:.2f}% \u00b1 {report.sd_mape:.2f}%\n"
+        f"  {'Mean Bias':<{W}}: {report.mean_bias:+.2f} \u00b1 {report.sd_bias:.2f} BPM\n"
+        f"  {'Quality trend':<{W}}: {quality_arrow}\n"
+        f"\n--- LIMITATIONS ---\n"
+        f"  - Longitudinal trends may reflect changes in device calibration, firmware,\n"
+        f"    sensor placement, or athlete physiology. Controlled conditions are required\n"
+        f"    to attribute accuracy changes to device-specific factors.\n"
+        f"  - Each session represents a single test. Independent replication per date\n"
+        f"    is recommended for robust conclusions.\n"
+        f"  - MAPE thresholds are heuristic (Navalta et al. 2020, INTERLIVE 2020).\n"
+        f"    LoA span is the primary validity indicator.\n"
         f"{'='*62}\n"
     )
 

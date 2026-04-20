@@ -15,7 +15,7 @@ import matplotlib.patches as mpatches
 
 from wearable_validation.models import (
     HRDataSeries, TestRunMetadata, AnalysisReport, GroupAnalysisReport,
-    IntensityBinResult, ArtifactReport,
+    IntensityBinResult, ArtifactReport, LongitudinalReport,
 )
 from wearable_validation.constants import QUALITY_COLOURS
 
@@ -273,6 +273,76 @@ def plot_group_bland_altman(
     ax.set_title(f"Group Bland-Altman Plot ({group_report.n_athletes} athletes)")
     ax.grid(True, alpha=0.25)
     _legend_below(ax, ncol=min(len(datasets) + 3, 5), fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def plot_longitudinal_trend(report: LongitudinalReport) -> plt.Figure:
+    """
+    Two-panel longitudinal accuracy trend plot.
+
+    Top panel  — MAPE (%) over test dates with quality-band shading:
+                 green < 3% (Excellent), blue 3–5% (Good),
+                 amber 5–10% (Acceptable), red > 10% (Poor).
+    Bottom panel — Bias (BPM) over test dates with per-session LoA spans shaded.
+    """
+    x = np.arange(len(report.dates))
+    mapes      = np.array(report.mape_trend)
+    biases     = np.array(report.bias_trend)
+    loa_lowers = np.array([s.report.loa_lower for s in report.sessions])
+    loa_uppers = np.array([s.report.loa_upper for s in report.sessions])
+    pt_colours = [QUALITY_COLOURS.get(q, "#555555") for q in report.quality_trend]
+
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 9))
+
+    # ── Top: MAPE with quality bands ──────────────────────────────────────────
+    y_max = max(float(mapes.max()) * 1.35, 12.0)
+    x_lo, x_hi = x[0] - 0.5, x[-1] + 0.5
+    ax_top.fill_between([x_lo, x_hi],  0,  3, alpha=0.12, color="#2ecc71", label="Excellent (< 3%)")
+    ax_top.fill_between([x_lo, x_hi],  3,  5, alpha=0.12, color="#3498db", label="Good (3–5%)")
+    ax_top.fill_between([x_lo, x_hi],  5, 10, alpha=0.12, color="#f39c12", label="Acceptable (5–10%)")
+    ax_top.fill_between([x_lo, x_hi], 10, y_max, alpha=0.12, color="#e74c3c", label="Poor (> 10%)")
+
+    ax_top.plot(x, mapes, color="#2c3e50", linewidth=1.8, zorder=3)
+    for xi, yi, c in zip(x, mapes, pt_colours):
+        ax_top.scatter(xi, yi, color=c, s=90, zorder=4,
+                       edgecolors="#2c3e50", linewidths=0.8)
+        ax_top.text(xi, yi + y_max * 0.03, f"{yi:.1f}%",
+                    ha="center", va="bottom", fontsize=8, color="#2c3e50")
+
+    ax_top.set_ylabel("MAPE (%)", fontsize=9)
+    ax_top.set_ylim(0, y_max)
+    ax_top.set_xlim(x_lo, x_hi)
+    ax_top.set_xticks(x)
+    ax_top.set_xticklabels(report.dates, rotation=30, ha="right", fontsize=8)
+    ax_top.set_title(
+        f"Longitudinal Accuracy — {report.device_name}  ·  {report.athlete_name}\n"
+        f"Mean MAPE = {report.mean_mape:.1f}% ± {report.sd_mape:.1f}%   "
+        f"({len(report.dates)} sessions)",
+        fontsize=10,
+    )
+    ax_top.grid(True, axis="y", alpha=0.3)
+    _legend_below(ax_top, ncol=4, fontsize=8)
+
+    # ── Bottom: Bias with LoA shading ─────────────────────────────────────────
+    ax_bot.fill_between(x, loa_lowers, loa_uppers,
+                        alpha=0.10, color="#e74c3c", label="Per-session 95% LoA")
+    ax_bot.plot(x, loa_uppers, color="#e74c3c", linewidth=0.9, linestyle="--", alpha=0.5)
+    ax_bot.plot(x, loa_lowers, color="#e74c3c", linewidth=0.9, linestyle="--", alpha=0.5)
+    ax_bot.plot(x, biases, color="#3498db", linewidth=1.8, zorder=3, label="Bias (BPM)")
+    for xi, yi, c in zip(x, biases, pt_colours):
+        ax_bot.scatter(xi, yi, color=c, s=90, zorder=4,
+                       edgecolors="#3498db", linewidths=0.8)
+    ax_bot.axhline(0, color="grey", linewidth=0.8, linestyle=":")
+
+    ax_bot.set_title("Bias & Limits of Agreement", fontsize=10)
+    ax_bot.set_ylabel("Bias — Wearable − Reference (BPM)", fontsize=9)
+    ax_bot.set_xlabel("Test Session", fontsize=9)
+    ax_bot.set_xticks(x)
+    ax_bot.set_xticklabels(report.dates, rotation=30, ha="right", fontsize=8)
+    ax_bot.grid(True, axis="y", alpha=0.3)
+    _legend_below(ax_bot, ncol=2, fontsize=8)
+
     fig.tight_layout()
     return fig
 

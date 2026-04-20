@@ -212,6 +212,36 @@ class ArtifactReport:
         return self.n_flagged_combined > 0
 
 
+# ── Longitudinal device tracking ─────────────────────────────────────────────
+
+@dataclass
+class LongitudinalSession:
+    """One test date's worth of data and results for a single device."""
+    date: str                    # ISO-8601 string, e.g. "2024-03-15"
+    report: AnalysisReport
+    data: HRDataSeries
+
+
+@dataclass
+class LongitudinalReport:
+    """Accuracy trend for the same device across N test dates."""
+    device_name: str
+    athlete_name: str
+    wearable_type: str
+    sport: str
+    sessions: list[LongitudinalSession]   # sorted by date ascending
+    # Derived trend arrays (same index order as sessions)
+    dates: list[str]
+    mape_trend: list[float]
+    bias_trend: list[float]
+    quality_trend: list[str]              # quality_label per session
+    # Summary stats across all sessions
+    mean_mape: float
+    sd_mape: float
+    mean_bias: float
+    sd_bias: float
+
+
 # ── Group (multi-athlete) analysis output ────────────────────────────────────
 
 @dataclass
